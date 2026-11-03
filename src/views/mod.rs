@@ -1,0 +1,27 @@
+pub mod app_view;
+pub mod command_palette;
+pub mod editor_context_menu;
+pub mod export_dialog;
+pub mod find_bar;
+pub mod goto_search;
+pub mod image_compress;
+pub mod image_editor;
+pub mod image_ui;
+pub mod more_options_menu;
+pub mod new_tab;
+pub mod notification;
+pub mod plugin_catalog;
+pub mod ribbon_menu;
+pub mod right_sidebar;
+pub mod scrollbar;
+pub mod settings_view;
+pub mod sidebar;
+pub mod tab_context_menu;
+pub mod tab_list;
+pub mod tabs_menu;
+pub mod text_input;
+pub mod toolbar_view;
+pub mod unused_attachments;
+
+#[cfg(test)]
+mod menu_i18n_tests;

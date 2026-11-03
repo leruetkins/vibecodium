@@ -1,0 +1,72 @@
+[package]
+name = "vibecodium"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+gpui = "0.2.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "6.0"
+rfd = "0.15"
+uuid = { version = "1.23", features = ["v4"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff", "ico"] }
+time = { version = "0.3", features = ["local-offset"] }
+tiny-skia = "0.11"
+cosmic-text = "0.14"
+oxipng = { version = "9.1", default-features = false }
+zip = { version = "2.6", default-features = false, features = ["deflate"] }
+pulldown-cmark = "0.13"
+smallvec = "1"
+arc-swap = "1"
+semver = "1"
+futures = "0.3"
+rquickjs = "0.8"
+ureq = { version = "2.10", features = ["json"] }
+sha2 = "0.10"
+memchr = "2"
+crop = { version = "0.4", features = ["utf16-metric", "graphemes"] }
+notify = "8"
+typst = "0.15.1"
+typst-pdf = "0.15.1"
+typst-layout = "0.15.1"
+typst-assets = "0.15.1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_DataExchange",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_UI_Shell",
+] }
+
+[build-dependencies]
+winres = "0.1"
+
+[dev-dependencies]
+tempfile = "3"
+
+# GPUI 0.2.2 is vendored (see vendor/gpui) with two Windows fixes.
+#
+# 1. Frame loop: upstream re-presents the cached scene on EVERY vsync tick for one
+# second after the last input event ("to prevent the display from underclocking
+# the refresh rate"). On Windows a present is not a cheap blit: it replays the
+# whole scene on the GPU. A resting mouse that emits a couple of 1-2px jitters
+# per second keeps that one-second window open permanently, so an idle, focused
+# window re-renders the full scene 60-144 times per second (~20% GPU).
+#
+# 2. Alt+click: a bare Alt is no longer handed to DefWindowProcW. It opened the
+# window menu loop, which consumed the following left click, so Alt+click never
+# reached the editor (it reveals the whole inline markup of the clicked line).
+# Alt+<key> combos still fall through, so Alt+F4/Alt+Space keep working.
+[patch.crates-io]
+gpui = { path = "vendor/gpui" }
+
+# In debug builds, optimize dependencies (GPUI, pulldown-cmark, etc.) so UI runs smoothly at 60-120 FPS
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+

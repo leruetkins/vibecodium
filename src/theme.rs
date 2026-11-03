@@ -1,0 +1,345 @@
+use gpui::{rgb, rgba, Rgba, WindowAppearance};
+
+/// A selectable theme preset: a stable id persisted in the config and the
+/// display name shown in the interface settings.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ThemePreset {
+    pub id: &'static str,
+    pub name: &'static str,
+}
+
+/// Light presets available for the "light appearance" slot.
+pub const LIGHT_THEMES: &[ThemePreset] = &[
+    ThemePreset { id: "light", name: "Catppuccin Latte" },
+    ThemePreset { id: "obsidian-light", name: "Obsidian" },
+];
+
+/// Dark presets available for the "dark appearance" slot.
+pub const DARK_THEMES: &[ThemePreset] = &[
+    ThemePreset { id: "dark", name: "Catppuccin Mocha" },
+    ThemePreset { id: "obsidian-dark", name: "Obsidian" },
+];
+
+/// Returns the presets for the requested appearance family.
+pub fn presets(is_dark: bool) -> &'static [ThemePreset] {
+    if is_dark {
+        DARK_THEMES
+    } else {
+        LIGHT_THEMES
+    }
+}
+
+/// Display name of a preset id; falls back to the id itself.
+pub fn preset_name(id: &str) -> &str {
+    LIGHT_THEMES
+        .iter()
+        .chain(DARK_THEMES)
+        .find(|preset| preset.id == id)
+        .map_or(id, |preset| preset.name)
+}
+
+/// Holds all color definitions for the active UI theme.
+#[derive(Clone, Debug)]
+pub struct Theme {
+    /// Flag indicating whether the theme is dark or light.
+    pub is_dark: bool,
+    /// Background color for the root application shell and window frame.
+    pub bg_app: Rgba,
+    /// Background color for the sidebar directory tree and panels.
+    pub bg_sidebar: Rgba,
+    /// Background color for the primary note editor viewport.
+    pub bg_editor: Rgba,
+    /// Background color for settings cards and elevated cards.
+    pub bg_card: Rgba,
+    /// Background color for hovered buttons and items.
+    pub bg_hover: Rgba,
+    /// Background color for active or selected items.
+    pub bg_selected: Rgba,
+    /// Primary border color for frames and dividers.
+    pub border: Rgba,
+    /// Subtle secondary border color.
+    pub border_subtle: Rgba,
+    /// Main high-contrast foreground text color.
+    pub text_primary: Rgba,
+    /// Secondary muted text color for descriptions and metadata.
+    pub text_secondary: Rgba,
+    /// Subtle muted text and icon color.
+    pub text_muted: Rgba,
+    /// Brand accent color for buttons, active tabs, and highlights.
+    pub accent: Rgba,
+    /// Hover state color for accented interactive elements.
+    pub accent_hover: Rgba,
+    /// Text color to be displayed directly on top of accent-colored backgrounds.
+    pub text_on_accent: Rgba,
+    /// Background color for active text selection in editor.
+    pub selection_bg: Rgba,
+    /// Tag chip background color.
+    #[allow(dead_code)]
+    pub tag_bg: Rgba,
+    /// Background color for inline code and code block fencing.
+    pub code_bg: Rgba,
+    /// Color for success indicators, inline code text, and green badges.
+    pub success: Rgba,
+}
+
+impl Theme {
+    /// Returns pale green background color for preview/Ctrl-selected text.
+    pub fn preview_selection_bg(&self) -> Rgba {
+        if self.is_dark {
+            rgba(0xa6e3a144)
+        } else {
+            rgba(0x40a02b38)
+        }
+    }
+
+    /// Background tint behind every in-editor find match.
+    pub fn find_match_bg(&self) -> Rgba {
+        if self.is_dark {
+            rgba(0xf9e2af55)
+        } else {
+            rgba(0xdf8e1d33)
+        }
+    }
+
+    /// Stronger tint for the match the find bar currently points at.
+    pub fn find_match_active_bg(&self) -> Rgba {
+        if self.is_dark {
+            rgba(0xf9e2af99)
+        } else {
+            rgba(0xdf8e1d66)
+        }
+    }
+
+    /// Red of the gutter marker beside a line selected by "Mark all".
+    pub fn marked_line_red(&self) -> Rgba {
+        if self.is_dark {
+            rgb(0xf38ba8)
+        } else {
+            rgb(0xd20f39)
+        }
+    }
+
+    /// Hairline tint for a horizontal rule.
+    ///
+    /// The design system's quiet icon tone: a neutral 12% foreground overlay over the
+    /// editor surface. It reads as a soft grey line in both themes, instead of a strip
+    /// of the muted text colour.
+    pub fn horizontal_rule(&self) -> Rgba {
+        if self.is_dark {
+            rgba(0xffffff1f)
+        } else {
+            rgba(0x0000001f)
+        }
+    }
+
+    /// Color for whitespace indicator dots (barely visible muted gray).
+    pub fn whitespace_dot(&self) -> Rgba {
+        let mut c = self.text_muted;
+        c.a = if self.is_dark { 0.40 } else { 0.45 };
+        c
+    }
+
+    /// Returns the default dark theme (Catppuccin Mocha palette).
+    pub fn dark() -> Self {
+        Self {
+            is_dark: true,
+            bg_app: rgb(0x181825),         // Catppuccin Mantle
+            bg_sidebar: rgb(0x11111b),     // Catppuccin Crust
+            bg_editor: rgb(0x1e1e2e),      // Catppuccin Base
+            bg_card: rgb(0x24273a),        // Macchiato Surface
+            bg_hover: rgb(0x313244),       // Surface0
+            bg_selected: rgb(0x45475a),    // Surface1
+            border: rgb(0x313244),
+            border_subtle: rgb(0x27273a),
+            text_primary: rgb(0xcdd6f4),   // Text
+            text_secondary: rgb(0xa6adc8), // Subtext0
+            text_muted: rgb(0x6c7086),     // Overlay0
+            accent: rgb(0x89b4fa),         // Blue
+            accent_hover: rgb(0xb4befe),   // Lavender
+            text_on_accent: rgb(0x11111b), // Dark text on light accent
+            selection_bg: rgba(0x89b4fa44),
+            tag_bg: rgb(0x313244),
+            code_bg: rgb(0x181825),
+            success: rgb(0xa6e3a1),        // Green
+        }
+    }
+
+    /// Returns the modern light theme (Catppuccin Latte clean palette).
+    pub fn light() -> Self {
+        Self {
+            is_dark: false,
+            bg_app: rgb(0xf2f4f8),         // Soft clean canvas
+            bg_sidebar: rgb(0xe8ecf2),     // Subtle contrasting sidebar
+            bg_editor: rgb(0xffffff),      // Crisp white editor surface
+            bg_card: rgb(0xffffff),        // White card background
+            bg_hover: rgb(0xe0e5ee),       // Gentle hover highlight
+            bg_selected: rgb(0xd2d9e6),    // Selected item background
+            border: rgb(0xd0d7e3),         // Crisp light border
+            border_subtle: rgb(0xe2e7f0),  // Subtle divider
+            text_primary: rgb(0x1e2030),   // High contrast deep charcoal
+            text_secondary: rgb(0x4c4f69), // Slate subtext
+            text_muted: rgb(0x8c8fa1),     // Muted icon and caption gray
+            accent: rgb(0x1e66f5),         // Vibrant royal blue
+            accent_hover: rgb(0x1855c4),   // Deep royal blue
+            text_on_accent: rgb(0xffffff), // Crisp white on royal blue
+            selection_bg: rgba(0x1e66f533),
+            tag_bg: rgb(0xe8ecf2),
+            code_bg: rgb(0xf2f4f8),        // Light code background
+            success: rgb(0x40a02b),        // Forest green
+        }
+    }
+
+    /// Returns the Obsidian-style dark theme (neutral graphite with a violet accent).
+    pub fn obsidian_dark() -> Self {
+        Self {
+            is_dark: true,
+            bg_app: rgb(0x181818),
+            bg_sidebar: rgb(0x202020),
+            bg_editor: rgb(0x1e1e1e),
+            bg_card: rgb(0x262626),
+            bg_hover: rgb(0x2a2a2a),
+            bg_selected: rgb(0x333333),
+            border: rgb(0x333333),
+            border_subtle: rgb(0x2a2a2a),
+            text_primary: rgb(0xdcddde),
+            text_secondary: rgb(0xb3b3b3),
+            text_muted: rgb(0x8a8a8a),
+            accent: rgb(0x8b5cf6),         // Obsidian violet
+            accent_hover: rgb(0xa78bfa),
+            text_on_accent: rgb(0xffffff),
+            selection_bg: rgba(0x8b5cf640),
+            tag_bg: rgb(0x262626),
+            code_bg: rgb(0x161616),
+            success: rgb(0x4ade80),
+        }
+    }
+
+    /// Returns the Obsidian-style light theme (paper white with a violet accent).
+    pub fn obsidian_light() -> Self {
+        Self {
+            is_dark: false,
+            bg_app: rgb(0xf7f7f7),
+            bg_sidebar: rgb(0xf0f0f0),
+            bg_editor: rgb(0xffffff),
+            bg_card: rgb(0xffffff),
+            bg_hover: rgb(0xe9e9e9),
+            bg_selected: rgb(0xdfdfdf),
+            border: rgb(0xd8d8d8),
+            border_subtle: rgb(0xe6e6e6),
+            text_primary: rgb(0x1f1f1f),
+            text_secondary: rgb(0x4a4a4a),
+            text_muted: rgb(0x8a8a8a),
+            accent: rgb(0x7c3aed),         // Violet, darkened for white surfaces
+            accent_hover: rgb(0x6d28d9),
+            text_on_accent: rgb(0xffffff),
+            selection_bg: rgba(0x7c3aed2e),
+            tag_bg: rgb(0xf0f0f0),
+            code_bg: rgb(0xf5f5f5),
+            success: rgb(0x16a34a),
+        }
+    }
+
+    /// Resolves the active theme from the interface settings and OS appearance.
+    ///
+    /// `ui.theme` picks the appearance (`system`, `light`, `dark`); the light
+    /// and dark slots each hold their own selected preset id.
+    pub fn from_ui(ui: &crate::settings::UiSettings, appearance: Option<WindowAppearance>) -> Self {
+        let is_dark = match ui.theme.as_str() {
+            "light" => false,
+            "dark" => true,
+            _ => match appearance {
+                Some(WindowAppearance::Light | WindowAppearance::VibrantLight) => false,
+                _ => true,
+            },
+        };
+
+        if is_dark {
+            match ui.dark_theme.as_str() {
+                "obsidian-dark" => Self::obsidian_dark(),
+                _ => Self::dark(),
+            }
+        } else {
+            match ui.light_theme.as_str() {
+                "obsidian-light" => Self::obsidian_light(),
+                _ => Self::light(),
+            }
+        }
+    }
+}
+
+impl Default for Theme {
+    /// Provides the default Dark theme for fallback initialization.
+    fn default() -> Self {
+        Self::dark()
+    }
+}
+
+/// Global GPUI resource wrapping the active theme.
+#[derive(Clone, Debug)]
+pub struct ActiveTheme(pub std::sync::Arc<Theme>);
+
+impl gpui::Global for ActiveTheme {}
+
+impl std::ops::Deref for ActiveTheme {
+    type Target = Theme;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::settings::UiSettings;
+
+    #[test]
+    fn resolves_selected_light_and_dark_presets() {
+        let ui = UiSettings {
+            theme: "dark".to_string(),
+            dark_theme: "obsidian-dark".to_string(),
+            ..Default::default()
+        };
+        let theme = Theme::from_ui(&ui, None);
+        assert!(theme.is_dark);
+        assert_eq!(theme.accent, rgb(0x8b5cf6));
+
+        let ui = UiSettings {
+            theme: "light".to_string(),
+            light_theme: "obsidian-light".to_string(),
+            ..Default::default()
+        };
+        let theme = Theme::from_ui(&ui, None);
+        assert!(!theme.is_dark);
+        assert_eq!(theme.accent, rgb(0x7c3aed));
+    }
+
+    #[test]
+    fn system_appearance_picks_the_matching_slot() {
+        let ui = UiSettings {
+            theme: "system".to_string(),
+            light_theme: "obsidian-light".to_string(),
+            dark_theme: "obsidian-dark".to_string(),
+            ..Default::default()
+        };
+
+        let light = Theme::from_ui(&ui, Some(WindowAppearance::Light));
+        assert!(!light.is_dark);
+        assert_eq!(light.accent, rgb(0x7c3aed));
+
+        let dark = Theme::from_ui(&ui, Some(WindowAppearance::Dark));
+        assert!(dark.is_dark);
+        assert_eq!(dark.accent, rgb(0x8b5cf6));
+    }
+
+    #[test]
+    fn unknown_preset_falls_back_to_default_family_theme() {
+        let ui = UiSettings {
+            theme: "light".to_string(),
+            light_theme: "does-not-exist".to_string(),
+            ..Default::default()
+        };
+        let theme = Theme::from_ui(&ui, None);
+        assert!(!theme.is_dark);
+        assert_eq!(theme.accent, Theme::light().accent);
+    }
+}
