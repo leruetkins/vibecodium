@@ -111,6 +111,10 @@ impl Render for AppView {
                 && !is_search_focused
                 && !is_custom_hex_focused
                 && !is_find_field_focused
+                // The inline rename field owns the keyboard, so the editor drops
+                // into its unfocused visuals: dashed current-line frame and a
+                // static muted caret.
+                && !self.bookmark_rename_focus_handle.is_focused(window)
                 && !self.folder_modal_focus_handle.is_focused(window)
                 && !self.folder_context_menu.is_open
                 && self.folder_modal == crate::views::sidebar::FolderModal::None);
@@ -302,6 +306,15 @@ if let Some(new_scroll) = new_active_scroll {
             .overflow_hidden()
             .bg(theme.bg_app)
             .text_color(theme.text_primary)
+            // A click anywhere outside the inline rename field commits it. The
+            // field stops its own mouse-down, so this only sees outside clicks.
+            // Committing on the press (not the release) keeps a menu action that
+            // starts a rename on click from closing the field it just opened.
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                if this.bookmark_rename.is_some() {
+                    this.commit_bookmark_rename(cx);
+                }
+            }))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 let ctrl_held = event.modifiers.control || event.modifiers.platform;
                 if this.ctrl_held != ctrl_held {
@@ -440,6 +453,15 @@ if let Some(new_scroll) = new_active_scroll {
                     cx.notify();
                 } else if this.quick_filter.is_mouse_selecting {
                     this.quick_filter.handle_mouse_move(event, &this.state.search_query, window, cx);
+                } else if this
+                    .bookmark_rename
+                    .as_ref()
+                    .is_some_and(|state| state.input.is_mouse_selecting)
+                {
+                    if let Some(state) = this.bookmark_rename.as_mut() {
+                        state.input.handle_mouse_move(event, window, 12.0, "Segoe UI");
+                    }
+                    cx.notify();
                 } else if this.panel_scrollbar_drag.active {
                     let y: f32 = event.position.y.into();
                     this.handle_panel_scrollbar_drag(y, cx);
@@ -610,6 +632,33 @@ if let Some(new_scroll) = new_active_scroll {
                 let key_lower = keystroke.key.to_lowercase();
                 if this.handle_toolbar_dropdown_key(&key_lower, window, cx) {
                     return;
+                }
+                // F2 renames the selected explorer item: the highlighted folder, or
+                // the active note when no folder is selected.
+                if keystroke.key.eq_ignore_ascii_case("f2")
+                    && !keystroke.modifiers.control
+                    && !keystroke.modifiers.platform
+                    && !keystroke.modifiers.alt
+                    && !keystroke.modifiers.shift
+                {
+                    if this.bookmark_rename.is_none()
+                        && !this.folder_context_menu.is_open
+                        && !this.file_context_menu.is_open
+                    {
+                        let selected_folder = this.selected_sidebar_folder.clone().filter(|path| {
+                            path.is_dir()
+                                && this.state.workspace_path.as_deref() != Some(path.as_path())
+                        });
+                        let target = selected_folder.map(|path| (path, true)).or_else(|| {
+                            this.state
+                                .active_document()
+                                .map(|doc| (doc.path.clone(), false))
+                        });
+                        if let Some((path, is_folder)) = target {
+                            this.start_sidebar_tree_rename(path, is_folder, window, cx);
+                            return;
+                        }
+                    }
                 }
                 // Ctrl+P opens Command Palette from anywhere (leaves don't handle it,
                 // so this root listener fires exactly once; the modal input
@@ -1152,8 +1201,8 @@ if let Some(new_scroll) = new_active_scroll {
                                                         .cursor_pointer()
                                                         .hover(|h| h.bg(theme.bg_hover))
                                                         .child(icons::icon(icons::ICON_FOLDER_PLUS, 14.0, theme.text_muted))
-                                                        .on_click(cx.listener(|this, _, _, cx| {
-                                                            this.create_new_folder(cx);
+                                                        .on_click(cx.listener(|this, _, window, cx| {
+                                                            this.create_new_folder(window, cx);
                                                         })),
                                                 )
                                                 .child(
@@ -1661,6 +1710,10 @@ if let Some(new_scroll) = new_active_scroll {
             })
             // ================= SIDEBAR FILE-TREE DRAG GHOST =================
             .when_some(self.render_sidebar_drag_ghost(theme), |d, ghost| {
+                d.child(ghost)
+            })
+            // ================= BOOKMARKS DRAG GHOST =================
+            .when_some(self.render_bookmark_drag_ghost(theme), |d, ghost| {
                 d.child(ghost)
             })
             // ================= RIBBON DRAG GHOST =================

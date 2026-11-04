@@ -21,6 +21,9 @@ impl AppView {
 
         let pixel_scale = window.scale_factor();
         let window_h = f32::from(window.bounds().size.height);
+        // The sidebar inline rename holds focus while it is open: the editor must
+        // not paint its caret or current-line highlight during that time.
+        let sidebar_rename_focused = self.bookmark_rename_focus_handle.is_focused(window);
 
         let root_id = if let Some(lid) = leaf_id {
             format!("central-editor-root-{}", lid.0)
@@ -30,6 +33,7 @@ impl AppView {
 
         let mut editor_root = div()
             .id(gpui::ElementId::Name(root_id.into()))
+            .relative()
             .flex()
             .flex_col()
             .flex_1()
@@ -102,6 +106,18 @@ impl AppView {
         };
 
         if let Some((view, doc)) = current_view_and_doc {
+            const NOTE_EDGE_PAD: f32 = 32.0;
+            let (note_margin_left, note_margin_right) = self.note_margins_for_leaf(leaf_id, window_w);
+            let width_limited = self.config.editor.editor_width_pct < 100;
+            let show_zones = self.config.editor.show_width_limit_zones;
+            let show_left_band = show_zones && width_limited && note_margin_left > 0.0;
+            let show_right_band = show_zones && width_limited && note_margin_right > 0.0;
+            // The current-line wash is a child of a row inside the padded note
+            // column. Negative insets pull it over the gutters, but a band on
+            // that side stops it at the note column instead.
+            let highlight_left = if show_left_band { 0.0 } else { -(NOTE_EDGE_PAD + note_margin_left) };
+            let highlight_right = if show_right_band { 0.0 } else { -(NOTE_EDGE_PAD + note_margin_right) };
+
             let note_title = doc
                 .path
                 .file_stem()
@@ -110,8 +126,9 @@ impl AppView {
 
             let lines_arc = Arc::clone(&view.window.lines);
             let doc_lines = doc.line_index.lines();
-            let line_number_digits = doc_lines.max(1).to_string().len().max(3);
-            let line_number_width = 40.0 + line_number_digits.saturating_sub(3) as f32 * line_char_width;
+            // The gutter itself owns this width: long numbers grow it instead
+            // of spilling left into the padding and under the width-limit band.
+            let line_number_width = Self::line_number_gutter_width(doc_lines);
             let visual_rows_arc = Arc::clone(&view.window.visual_rows);
             let code_states_arc = Arc::clone(&view.window.code_states);
             let height_index_arc = Arc::clone(&view.window.height_index);
@@ -156,7 +173,11 @@ impl AppView {
             let find_field_focused = self.find_bar.is_open
                 && (self.find_bar.query.is_focused(window)
                     || self.find_bar.replace.is_focused(window));
-            let caret_is_inactive = !is_leaf_active || find_field_focused;
+            // The inline rename takes the keyboard away from the editor, so the
+            // editor renders the same way an unfocused split pane does: a static
+            // muted caret and a dashed current-line frame.
+            let caret_is_inactive =
+                !is_leaf_active || find_field_focused || sidebar_rename_focused;
             let mut active_block_ids: std::collections::HashSet<usize> = std::collections::HashSet::new();
             if is_editing {
                 if let Some(s) = code_states_arc.get(cursor_line).and_then(|s| s.as_ref()) {
@@ -1505,7 +1526,16 @@ impl AppView {
                 } else {
                     None
                 };
-                if self.edit_mode && grid_tbl.is_none() {
+                if self.edit_mode {
+                    // A grid table paints its cells below the table's top edge
+                    // margin, so the dots have to start at the same offset.
+                    let ws_top_offset = if grid_tbl
+                        .is_some_and(|tbl| v.line_idx == tbl.first_line)
+                    {
+                        crate::markdown::TABLE_EDGE_MARGIN
+                    } else {
+                        0.0
+                    };
                     let ws_quads = whitespace_dot_quads(
                         line,
                         &row_layout,
@@ -1514,6 +1544,7 @@ impl AppView {
                         guide_columns,
                         preview_sel,
                         self.show_invisibles,
+                        ws_top_offset,
                     );
                     if !ws_quads.is_empty() {
                         let dot_color = if self.show_invisibles {
@@ -1558,7 +1589,9 @@ impl AppView {
                         );
                     }
 
-                    if self.show_invisibles && v.is_last_sub {
+                    // A table paints its rows as cells, not as text lines, so
+                    // there is no line end to mark inside it.
+                    if self.show_invisibles && v.is_last_sub && grid_tbl.is_none() {
                         let end_col = if line.is_empty() || v.char_start >= v.char_end {
                             0
                         } else {
@@ -1811,8 +1844,7 @@ impl AppView {
                     .when(grid_tbl.is_some(), |d| d.items_start())
                     .h(px(row_h))
                     .py_0()
-                    .px_2()
-                    .rounded_sm();
+                    .px_2();
 
                 if show_current_line_highlight {
                     let is_sep = grid_tbl.map_or(false, |tbl| v.line_idx == tbl.sep_line());
@@ -1838,15 +1870,14 @@ impl AppView {
                         row_h
                     };
 
-                    if is_leaf_active {
+                    if is_leaf_active && !sidebar_rename_focused {
                         row_div = row_div.child(
                             div()
                                 .absolute()
-                                .left_0()
-                                .right_0()
+                                .left(px(highlight_left))
+                                .right(px(highlight_right))
                                 .top(px(hl_top))
                                 .h(px(hl_h))
-                                .rounded_sm()
                                 .bg(theme.bg_hover),
                         );
                     } else {
@@ -1857,11 +1888,10 @@ impl AppView {
                         row_div = row_div.child(
                             div()
                                 .absolute()
-                                .left_0()
-                                .right_0()
+                                .left(px(highlight_left))
+                                .right(px(highlight_right))
                                 .top(px(hl_top))
                                 .h(px(hl_h))
-                                .rounded_sm()
                                 .bg(faint_bg)
                                 .border_1()
                                 .border_dashed()
@@ -2047,6 +2077,8 @@ impl AppView {
                             }
                             window.focus(&this.focus_handle);
                             this.reset_editor_cursor_blink(cx);
+                            this.scroll_cursor_into_view();
+                            this.state.publish_snapshot();
                             cx.notify();
                         }))
                         .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
@@ -2170,37 +2202,23 @@ impl AppView {
                             let current_widths = table_layout.as_ref().unwrap().col_widths.clone();
                             let tbl_clone = tbl.clone();
                             let group_name = format!("tbl-add-col-grp-{}", tbl.first_line);
-                            // Row heights vary with the wrapped lines of every
-                            // row, so the strip is measured from the table's own
-                            // cell budgets instead of a fixed row height.
-                            let col_budgets = table_layout.as_ref().unwrap().col_chars.clone();
-                            let row_h_of = |l: usize| -> f32 {
-                                if l == tbl.sep_line() {
-                                    return 1.0;
-                                }
-                                let text = &lines_arc[l];
-                                let cells = crate::table::split_row(text);
-                                let ranges: Vec<std::ops::Range<usize>> =
-                                    cells.iter().map(|c| c.content.clone()).collect();
-                                let n = crate::markdown::table_row_wrap_lines(
-                                    text,
-                                    &ranges,
-                                    &col_budgets,
-                                    None,
-                                    &crate::markdown::InlineReveal::None,
-                                    headings,
-                                );
-                                let content = n as f32 * typography.table_line_height
-                                    + 2.0 * crate::markdown::TABLE_PAD_Y;
-                                if l == tbl.first_line || l == tbl.last_line {
-                                    content + crate::markdown::TABLE_EDGE_MARGIN
-                                } else {
-                                    content
-                                }
-                            };
-                            let above: f32 = (tbl.first_line..tbl.last_line).map(row_h_of).sum();
-                            let table_h = above + row_h_of(tbl.last_line);
-                            let col_btn_top = -above;
+                            // The strip spans the painted grid, not the row boxes:
+                            // the table keeps an edge margin above the header and
+                            // below the last row, so the visible grid starts and
+                            // ends one margin inside the row heights. The heights
+                            // come from the height index the rows are painted at,
+                            // so a wrapped or revealed cell cannot shift the strip.
+                            let above: f32 = (tbl.first_line..tbl.last_line)
+                                .map(|l| {
+                                    view.window
+                                        .first_row_of_line(l)
+                                        .map_or(0.0, |idx| height_index_arc.height_of(idx))
+                                })
+                                .sum();
+                            let table_h = above + row_h;
+                            let col_btn_top = crate::markdown::TABLE_EDGE_MARGIN - above;
+                            let col_btn_h = (table_h - 2.0 * crate::markdown::TABLE_EDGE_MARGIN)
+                                .max(typography.table_line_height);
                             Some(
                                 div()
                                     .id(gpui::ElementId::Name(format!("table-add-col-{}", v_idx).into()))
@@ -2209,7 +2227,7 @@ impl AppView {
                                     .left(px(total_w - 1.0))
                                     .top(px(col_btn_top))
                                     .w(px(14.0))
-                                    .h(px(table_h))
+                                    .h(px(col_btn_h))
                                     .cursor_pointer()
                                     .child(
                                         div()
@@ -2375,7 +2393,7 @@ impl AppView {
                         div()
                             .id(gpui::ElementId::Name(format!("line-num-{}-{}", lid_tag, v_idx).into()))
                             .relative()
-                            .w(px(40.0))
+                            .w(px(line_number_width))
                             .flex_shrink_0()
                             .h(px(row_h))
                             .when(!is_tbl_sep, |d| {
@@ -2384,14 +2402,14 @@ impl AppView {
                                         .absolute()
                                         .right(px(if markers_active { FIND_MARKER_W } else { 0.0 }))
                                         .top(px(line_num_top))
-                                        .w(px(line_number_width))
+                                        .w(px(line_number_width - if markers_active { FIND_MARKER_W } else { 0.0 }))
                                         .h(px(line_num_h))
                                         .flex()
                                         .items_center()
                                         .justify_end()
                                         .text_xs()
                                         .text_color(if is_current {
-                                            if is_leaf_active {
+                                            if is_leaf_active && !sidebar_rename_focused {
                                                 theme.accent
                                             } else {
                                                 theme.text_secondary
@@ -2734,17 +2752,14 @@ impl AppView {
                 items.push(row_div);
             }
 
-            let window_w_editor = f32::from(window.bounds().size.width);
-            let (note_margin_left, note_margin_right) = self.note_margins_for_leaf(leaf_id, window_w_editor);
-
             let mut editor_list = div()
                 .id(gpui::ElementId::from(("note-editor-list", lid_tag)))
                 .flex()
                 .flex_col()
                 .when(show_scrollbar, |d| d.overflow_hidden())
                 .size_full()
-                .pl(px(32.0 + note_margin_left))
-                .pr(px(32.0 + note_margin_right))
+                .pl(px(NOTE_EDGE_PAD + note_margin_left))
+                .pr(px(NOTE_EDGE_PAD + note_margin_right))
                 .pt_0();
 
             if is_leaf_active {
@@ -2970,13 +2985,53 @@ impl AppView {
                 editor_container = editor_container.child(scrollbar_track);
             }
 
-            editor_root = editor_root.child(title_box);
+            // The bands start at the note title, so the navigation bar and the
+            // toolbar strips keep their own backgrounds. Painting them last
+            // inside this container keeps one continuous column; they have no
+            // listeners, so clicks still reach the elements underneath.
+            let width_band = |id: &'static str, at_left: bool, width: f32| {
+                let band = div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .w(px(width))
+                    .bg(theme.width_limit_bg());
+                let band = if at_left { band.left_0() } else { band.right_0() };
+                band.id(gpui::ElementId::from((id, lid_tag)))
+            };
+
+            let mut note_body = div()
+                .relative()
+                .flex()
+                .flex_col()
+                .w_full()
+                .flex_1()
+                .min_w_0()
+                .min_h_0();
+
+            note_body = note_body.child(title_box);
             // The find bar belongs directly under the note title panel and
             // above the editor body, so it never floats over the text.
             if is_leaf_active && self.find_bar.is_open {
-                editor_root = editor_root.child(self.render_find_bar(leaf_id, theme, window, cx));
+                note_body = note_body.child(self.render_find_bar(leaf_id, theme, window, cx));
             }
-            editor_root = editor_root.child(editor_container);
+            note_body = note_body.child(editor_container);
+
+            if show_right_band {
+                note_body = note_body.child(width_band(
+                    "note-width-limit-area",
+                    false,
+                    NOTE_EDGE_PAD + note_margin_right,
+                ));
+            }
+            if show_left_band {
+                note_body = note_body.child(width_band(
+                    "note-width-limit-area-left",
+                    true,
+                    NOTE_EDGE_PAD + note_margin_left,
+                ));
+            }
+            editor_root = editor_root.child(note_body);
         } else if leaf_id
             .and_then(|lid| self.state.leaves.get(&lid))
             .and_then(|l| l.active_tab())

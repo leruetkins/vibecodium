@@ -249,6 +249,9 @@ pub enum BookmarkDropTarget {
 pub struct BookmarkDragState {
     pub source: BookmarkDragSource,
     pub start_y: f32,
+    /// Current pointer position in window coordinates; drives the drag ghost.
+    pub pointer_x: f32,
+    pub pointer_y: f32,
     pub is_dragging: bool,
     pub target: Option<BookmarkDropTarget>,
 }
@@ -291,9 +294,14 @@ pub enum BookmarkRenameTarget {
         item_index: usize,
     },
     Folder(usize),
+    /// File or folder row in the sidebar explorer tree.
+    TreePath { path: PathBuf, is_folder: bool },
 }
 
 /// Active inline rename state with TextInput and selection.
+///
+/// Shared by the bookmarks list and the sidebar explorer tree, so both use the same
+/// input element and editing behavior.
 pub struct BookmarkRenameState {
     pub target: BookmarkRenameTarget,
     pub input: TextInput,

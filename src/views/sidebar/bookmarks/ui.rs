@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 use gpui::{
-    div, prelude::*, px, rgb, rgba, AnyElement, Context, IntoElement, KeyDownEvent,
+    div, prelude::*, px, AnyElement, Context, IntoElement, KeyDownEvent,
     MouseButton, MouseDownEvent, MouseMoveEvent, SharedString, Window,
 };
 use crate::icons;
@@ -102,31 +102,59 @@ impl AppView {
         if self.bookmark_rename.is_some() {
             self.commit_bookmark_rename(cx);
         }
-        let mut rename = BookmarkRenameState::new(
+        self.bookmark_rename = Some(BookmarkRenameState::new(
             target,
             initial_title.to_string(),
             self.bookmark_rename_focus_handle.clone(),
-        );
-        rename
-            .input
-            .enable_blink(|this: &mut AppView| &mut this.bookmark_rename_blink, cx);
-        self.bookmark_rename = Some(rename);
+        ));
+        self.bookmark_rename_blink
+            .enable(crate::blink_manager::BlinkTarget::SidebarRename, cx);
         window.focus(&self.bookmark_rename_focus_handle);
+        self.arm_inline_rename_blur(window, cx);
         cx.notify();
     }
 
-    /// Commits the active inline rename.
+    /// Commits the rename when focus leaves its input for another control.
+    ///
+    /// A window deactivation also moves focus away; that must not commit a
+    /// half-typed name, so the callback only acts while the window is active.
+    pub(crate) fn arm_inline_rename_blur(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.bookmark_rename_blur_subscription = Some(cx.on_blur(
+            &self.bookmark_rename_focus_handle,
+            window,
+            |this, window, cx| {
+                if !window.is_window_active() {
+                    return;
+                }
+                if this.bookmark_rename.is_some() {
+                    this.commit_bookmark_rename(cx);
+                }
+            },
+        ));
+    }
+
+    /// Commits the active inline rename (bookmarks or the sidebar explorer tree).
     pub fn commit_bookmark_rename(&mut self, cx: &mut Context<Self>) {
         let Some(rename) = self.bookmark_rename.take() else {
             return;
         };
+        self.bookmark_rename_blink.disable(cx);
         let new_name = rename.input.text.trim().to_string();
         if new_name.is_empty() {
+            // Keep the input open so the user can type a name instead of losing the
+            // gesture.
+            self.bookmark_rename = Some(rename);
+            self.bookmark_rename_blink
+                .enable(crate::blink_manager::BlinkTarget::SidebarRename, cx);
             cx.notify();
             return;
         }
 
-        match rename.target {
+        match rename.target.clone() {
             BookmarkRenameTarget::Group(group_idx) => {
                 if group_idx < self.state.bookmarks.items.len() {
                     let old_title = rename.original_title;
@@ -150,6 +178,43 @@ impl AppView {
                 self.state.bookmarks.rename_folder_bookmark(item_index, new_name);
                 self.save_bookmarks();
             }
+            BookmarkRenameTarget::TreePath { path, is_folder } => {
+                match crate::views::sidebar::folder_actions::rename_folder(&path, &new_name) {
+                    Ok(new_path) if new_path == path => {
+                        // Unchanged name: the inline field simply closes.
+                    }
+                    Ok(new_path) => {
+                        self.state.handle_file_renamed(&path, &new_path);
+                        if is_folder {
+                            self.state.expanded_folders.remove(&path);
+                            self.state.expanded_folders.insert(new_path.clone());
+                            self.selected_sidebar_folder = Some(new_path);
+                            self.state.status_text =
+                                self.t_fmt("sidebar.folder_renamed", &[&new_name]);
+                        } else if self.selected_sidebar_folder.as_deref() == Some(path.as_path()) {
+                            self.selected_sidebar_folder = None;
+                        }
+                        self.state.reload_file_tree();
+                        self.state.publish_snapshot();
+                    }
+                    Err(e) => {
+                        // Keep the input open so the name can be corrected.
+                        self.bookmark_rename = Some(rename);
+                        self.bookmark_rename_blink
+                            .enable(crate::blink_manager::BlinkTarget::SidebarRename, cx);
+                        self.push_notification(
+                            crate::views::notification::NotificationType::Error,
+                            None,
+                            e,
+                            Some(6000),
+                            cx,
+                        );
+                    }
+                }
+            }
+        }
+        if self.bookmark_rename.is_none() {
+            self.bookmark_rename_blur_subscription = None;
         }
         cx.notify();
     }
@@ -157,6 +222,8 @@ impl AppView {
     /// Cancels active inline rename without modifying bookmarks.
     pub fn cancel_bookmark_rename(&mut self, cx: &mut Context<Self>) {
         self.bookmark_rename = None;
+        self.bookmark_rename_blur_subscription = None;
+        self.bookmark_rename_blink.disable(cx);
         cx.notify();
     }
 
@@ -399,7 +466,25 @@ impl AppView {
         cx.notify();
     }
 
-    /// Renders the inline rename input box with purple border matching Image 2.
+    /// Floating preview of the dragged favorite note, drawn at the pointer so the
+    /// gesture stays visible even when the source row scrolls out of view.
+    pub fn render_bookmark_drag_ghost(&self, theme: &Theme) -> Option<AnyElement> {
+        let drag = self
+            .bookmark_drag
+            .as_ref()
+            .filter(|drag| drag.is_dragging)?;
+
+        Some(crate::views::sidebar::drag_ghost::sidebar_drag_ghost(
+            drag.source.display_name.clone(),
+            icons::ICON_FILE_TEXT,
+            13.0,
+            drag.pointer_x,
+            drag.pointer_y,
+            theme,
+        ))
+    }
+
+    /// Renders the inline rename input box shared by bookmarks and the explorer tree.
     pub fn render_bookmark_rename_input(
         &self,
         theme: &Theme,
@@ -411,9 +496,11 @@ impl AppView {
         };
 
         let pixel_scale = window.scale_factor();
-        let input_div = rename
-            .input
-            .render("", theme, window, pixel_scale, 12.0, "Segoe UI");
+        // Render with the view-level blink manager: the input's own manager is not
+        // the one the handlers drive, so the caret would never blink.
+        let mut input = rename.input.clone();
+        input.blink = self.bookmark_rename_blink.clone();
+        let input_div = input.render("", theme, window, pixel_scale, 12.0, "Segoe UI");
 
         div()
             .id("bookmark-inline-rename-box")
@@ -426,8 +513,8 @@ impl AppView {
             .h(px(24.0))
             .px_2()
             .rounded_md()
-            .border_2()
-            .border_color(rgb(0x8b5cf6)) // Rounded purple border matching Image 2
+            .border_1()
+            .border_color(theme.accent)
             .bg(theme.bg_card)
             .cursor(gpui::CursorStyle::IBeam)
             .on_mouse_down(
@@ -437,9 +524,9 @@ impl AppView {
                     window.focus(&this.bookmark_rename_focus_handle);
                     if let Some(ref mut r) = this.bookmark_rename {
                         r.input.handle_mouse_down(event, window, 12.0, "Segoe UI");
-                        r.input
-                            .pause_and_show(|t: &mut AppView| &mut t.bookmark_rename_blink, cx);
                     }
+                    this.bookmark_rename_blink
+                        .pause_and_show(crate::blink_manager::BlinkTarget::SidebarRename, cx);
                     cx.notify();
                 }),
             )
@@ -454,6 +541,7 @@ impl AppView {
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
+                    cx.stop_propagation();
                     if let Some(ref mut r) = this.bookmark_rename {
                         r.input.handle_mouse_up();
                         cx.notify();
@@ -464,7 +552,11 @@ impl AppView {
                 let key = &event.keystroke.key;
                 if key == "enter" {
                     this.commit_bookmark_rename(cx);
-                    window.focus(&this.focus_handle);
+                    // On an invalid name the field stays open; keep focus in it so
+                    // the blur listener does not retry the same failed commit.
+                    if this.bookmark_rename.is_none() {
+                        window.focus(&this.focus_handle);
+                    }
                     return;
                 }
                 if key == "escape" {
@@ -472,11 +564,14 @@ impl AppView {
                     window.focus(&this.focus_handle);
                     return;
                 }
-                if let Some(ref mut r) = this.bookmark_rename {
-                    if r.input.handle_key_down(event, cx) {
-                        r.input
-                            .pause_and_show(|t: &mut AppView| &mut t.bookmark_rename_blink, cx);
-                    }
+                let changed = if let Some(ref mut r) = this.bookmark_rename {
+                    r.input.handle_key_down(event, cx)
+                } else {
+                    false
+                };
+                if changed {
+                    this.bookmark_rename_blink
+                        .pause_and_show(crate::blink_manager::BlinkTarget::SidebarRename, cx);
                 }
             }))
             .child(input_div)
@@ -509,6 +604,31 @@ impl AppView {
                 let x: f32 = event.position.x.into();
                 let y: f32 = event.position.y.into();
                 this.open_bookmark_context_menu(BookmarkContextTarget::EmptyArea, x, y, cx);
+            }))
+            // Keeps the drag ghost glued to the pointer over gaps between rows, where
+            // no row listener runs.
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                if let Some(ref mut drag) = this.bookmark_drag {
+                    drag.pointer_x = event.position.x.into();
+                    drag.pointer_y = event.position.y.into();
+                    if drag.is_dragging {
+                        cx.notify();
+                    }
+                }
+            }))
+            // A drag released over empty space (not a row, not the root zone) has no
+            // destination: drop the state instead of leaving the gesture armed. Rows run
+            // first in the bubble phase and take the state themselves, so this only sees
+            // gestures that ended outside every drop target.
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                if this.bookmark_drag.take().is_some() {
+                    cx.notify();
+                }
+            }))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                if this.bookmark_drag.take().is_some() {
+                    cx.notify();
+                }
             }));
 
         if self.state.bookmarks.is_empty() {
@@ -586,6 +706,7 @@ impl AppView {
                         &display_name,
                         title.clone(),
                         item_idx,
+                        is_dragging_active,
                         theme,
                         window,
                         cx,
@@ -644,15 +765,21 @@ impl AppView {
             scroll_container = scroll_container.child(
                 div()
                     .id("bookmark-root-drop-zone")
+                    .relative()
                     .h(px(40.0))
                     .w_full()
-                    .rounded_md()
-                    .border_1()
+                    // An explicit square rectangle instead of a top border: a border
+                    // picks up rounded caps at the ends of the line.
                     .when(is_hovered, |d| {
-                        d.border_color(theme.accent).bg(theme.bg_hover)
-                    })
-                    .when(!is_hovered, |d| {
-                        d.border_color(rgba(0x00000000))
+                        d.child(
+                            div()
+                                .absolute()
+                                .top(px(0.0))
+                                .left(px(0.0))
+                                .right(px(0.0))
+                                .h(px(2.0))
+                                .bg(theme.accent),
+                        )
                     })
                     .on_mouse_move(cx.listener(|this, _, _, cx| {
                         if let Some(ref mut drag) = this.bookmark_drag {
@@ -685,7 +812,7 @@ impl AppView {
         group_index: Option<usize>,
         item_index: usize,
         active_path: Option<&PathBuf>,
-        _is_dragging_active: bool,
+        is_dragging_active: bool,
         theme: &Theme,
         window: &Window,
         cx: &Context<Self>,
@@ -695,7 +822,7 @@ impl AppView {
         let is_selected = active_path.map(|p| p == &abs_path).unwrap_or(false);
 
         let is_being_dragged = self.bookmark_drag.as_ref().map(|d| {
-            d.source.group_index == group_index && d.source.item_index == item_index
+            d.is_dragging && d.source.group_index == group_index && d.source.item_index == item_index
         }).unwrap_or(false);
 
         let is_drop_target = match self.bookmark_drag.as_ref().and_then(|d| d.target.as_ref()) {
@@ -745,14 +872,15 @@ impl AppView {
                     .text_color(theme.accent)
                     .font_weight(gpui::FontWeight::SEMIBOLD)
             })
-            .when(!is_selected && !is_drop_target && !is_menu_open, |s| {
+            .when(!is_selected && !is_menu_open && !is_dragging_active, |s| {
                 s.hover(|h| h.bg(theme.bg_hover)).text_color(theme.text_primary)
             })
+            // The grabbed row keeps an accent frame while the ghost follows the pointer,
+            // the same as the sidebar file tree.
             .when(is_being_dragged, |s| {
-                s.opacity(0.5)
-            })
-            .when(is_drop_target, |s| {
-                s.border_t_2().border_color(theme.accent).bg(theme.bg_hover)
+                s.border_1()
+                    .border_color(theme.accent)
+                    .text_color(theme.accent)
             })
             .child(file_svg);
 
@@ -773,9 +901,6 @@ impl AppView {
                         this.close_bookmark_context_menu(cx);
                         return;
                     }
-                    if this.bookmark_rename.is_some() {
-                        this.commit_bookmark_rename(cx);
-                    }
                     this.bookmark_drag = Some(BookmarkDragState {
                         source: BookmarkDragSource {
                             group_index,
@@ -784,6 +909,8 @@ impl AppView {
                             display_name: name_owned.clone(),
                         },
                         start_y: event.position.y.into(),
+                        pointer_x: event.position.x.into(),
+                        pointer_y: event.position.y.into(),
                         is_dragging: false,
                         target: None,
                     });
@@ -847,6 +974,25 @@ impl AppView {
                 }));
         }
 
+        // Only the insertion line marks the destination; the row itself is not
+        // highlighted while a note is being reordered. The line is absolute so the
+        // target row does not shift by a border width as it changes.
+        if is_drop_target && !is_being_dragged {
+            let mut line = div()
+                .absolute()
+                .left(px(0.0))
+                .right(px(0.0))
+                .top(px(-1.0))
+                .h(px(2.0))
+                .bg(theme.accent);
+            // Root-level insertions are a plain square strip; only items inside a
+            // group keep the pill-shaped line.
+            if group_index.is_some() {
+                line = line.rounded_full();
+            }
+            row = row.relative().child(line);
+        }
+
         row.into_any_element()
     }
 
@@ -858,6 +1004,7 @@ impl AppView {
         display_name: &str,
         custom_title: Option<String>,
         item_index: usize,
+        is_dragging_active: bool,
         theme: &Theme,
         window: &Window,
         cx: &Context<Self>,
@@ -884,7 +1031,9 @@ impl AppView {
             .px_2()
             .rounded_md()
             .cursor_pointer()
-            .when(!is_menu_open, |s| s.hover(|h| h.bg(theme.bg_hover)))
+            .when(!is_menu_open && !is_dragging_active, |s| {
+                s.hover(|h| h.bg(theme.bg_hover))
+            })
             .child(folder_svg);
 
         if is_editing {
@@ -951,6 +1100,19 @@ impl AppView {
             self.bookmark_drag.as_ref().and_then(|d| d.target.as_ref()),
             Some(BookmarkDropTarget::IntoGroup(idx)) if idx == &group_idx
         );
+        let is_drop_target_item = matches!(
+            self.bookmark_drag.as_ref().and_then(|d| d.target.as_ref()),
+            Some(BookmarkDropTarget::GroupItem(idx, _)) if idx == &group_idx
+        );
+        // A note moved here from the root or another group highlights the whole group:
+        // the header and the files inside it share one frame. Reordering within the
+        // group keeps only the insertion line.
+        let source_outside_group = self
+            .bookmark_drag
+            .as_ref()
+            .map(|drag| drag.source.group_index != Some(group_idx))
+            .unwrap_or(false);
+        let frame_group = source_outside_group && (is_drop_target_group || is_drop_target_item);
 
         let chevron = if is_expanded {
             icons::icon(icons::ICON_CHEVRON_DOWN, 12.0, theme.text_muted)
@@ -976,10 +1138,9 @@ impl AppView {
             .px_2()
             .rounded_md()
             .cursor_pointer()
-            .when(is_drop_target_group, |s| {
-                s.border_1().border_color(theme.accent).bg(theme.bg_hover)
-            })
-            .when(!is_drop_target_group && !is_menu_open, |s| {
+            // No row highlight for the group while reordering: the insertion line at
+            // the end of the group is the only marker (same as the ribbon rail).
+            .when(!is_menu_open && !is_dragging_active, |s| {
                 s.hover(|h| h.bg(theme.bg_hover))
             })
             .child(
@@ -1119,6 +1280,31 @@ impl AppView {
             }
 
             group_elem = group_elem.child(children_container);
+        }
+
+        if frame_group {
+            // Drawn as an overlay instead of a real border: a border would take a pixel
+            // from the layout and shift the header's title down and right.
+            group_elem = group_elem.relative().child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(theme.accent),
+            );
+        } else if is_drop_target_group {
+            // Appending inside the same group: only the line at the end of the group.
+            group_elem = group_elem.relative().child(
+                div()
+                    .absolute()
+                    .left(px(0.0))
+                    .right(px(0.0))
+                    .bottom_0()
+                    .h(px(2.0))
+                    .rounded_full()
+                    .bg(theme.accent),
+            );
         }
 
         group_elem.into_any_element()
