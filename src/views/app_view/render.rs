@@ -1,5 +1,7 @@
 use super::*;
 
+use gpui::AnimationExt;
+
 impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         log_fps_tick();
@@ -761,6 +763,11 @@ if let Some(new_scroll) = new_active_scroll {
                                 .w(px(self.sidebar_width))
                                 .flex_shrink_0()
                                 .h_full()
+                                // The header row's min-content (badge + view buttons) can
+                                // exceed a narrow sidebar. Clip it here, like the sidebar
+                                // column below, so the overflowing buttons can neither
+                                // paint over nor take clicks from the tab strip.
+                                .overflow_hidden()
                                 .bg(theme.bg_sidebar)
                                 .border_b_1()
                                 .border_color(theme.border)
@@ -776,23 +783,11 @@ if let Some(new_scroll) = new_active_scroll {
                                         .border_r_1()
                                         .border_color(theme.border)
                                         .child(
-                                            div()
-                                                .id("btn-toggle-sidebar")
-                                                .flex()
-                                                .items_center()
-                                                .justify_center()
-                                                .p_1()
-                                                .rounded_md()
-                                                .cursor_pointer()
-                                                .hover(|h| h.bg(theme.bg_hover))
-                                                .child(icons::icon(
-                                                    icons::ICON_PANEL_LEFT,
-                                                    15.0,
-                                                    theme.accent,
-                                                ))
-                                                .on_click(cx.listener(|this, _, _, cx| {
-                                                    this.toggle_sidebar(cx);
-                                                })),
+                                            self.render_sidebar_toggle_button(
+                                                theme.accent,
+                                                theme,
+                                                cx,
+                                            ),
                                         ),
                                 )
                                 // 2. File tree header (VIBECODIUM badge and drag region)
@@ -807,6 +802,9 @@ if let Some(new_scroll) = new_active_scroll {
                                         .px_3()
                                         .child(
                                             div()
+                                                .flex()
+                                                .items_end()
+                                                .gap_1()
                                                 .px_2()
                                                 .py_0p5()
                                                 .bg(theme.accent)
@@ -814,7 +812,21 @@ if let Some(new_scroll) = new_active_scroll {
                                                 .font_weight(gpui::FontWeight::BOLD)
                                                 .rounded_md()
                                                 .text_xs()
-                                                .child("VIBECODIUM"),
+                                                // The badge is a free area in the custom titlebar:
+                                                // dragging it moves the window, like the empty
+                                                // header space to its right.
+                                                .window_control_area(WindowControlArea::Drag)
+                                                .child("VIBECODIUM")
+                                                .child(
+                                                    div()
+                                                        .pb(px(1.0))
+                                                        .text_size(px(9.0))
+                                                        .font_weight(gpui::FontWeight::NORMAL)
+                                                        .child(format!(
+                                                            "v{}",
+                                                            env!("CARGO_PKG_VERSION")
+                                                        )),
+                                                ),
                                         )
                                         // Files / Search view toggle (Obsidian-style)
                                         .child(
@@ -842,7 +854,7 @@ if let Some(new_scroll) = new_active_scroll {
                                                         .hover(|h| h.bg(theme.bg_hover))
                                                         .child(icons::icon(
                                                             icons::ICON_FOLDER,
-                                                            14.0,
+                                                            16.0,
                                                             if self.sidebar_mode == crate::views::sidebar::SidebarMode::Files {
                                                                 theme.accent
                                                             } else {
@@ -871,7 +883,7 @@ if let Some(new_scroll) = new_active_scroll {
                                                         .hover(|h| h.bg(theme.bg_hover))
                                                         .child(icons::icon(
                                                             icons::ICON_SEARCH,
-                                                            14.0,
+                                                            16.0,
                                                             if self.sidebar_mode == crate::views::sidebar::SidebarMode::Search {
                                                                 theme.accent
                                                             } else {
@@ -900,7 +912,7 @@ if let Some(new_scroll) = new_active_scroll {
                                                         .hover(|h| h.bg(theme.bg_hover))
                                                         .child(icons::icon(
                                                             icons::ICON_BOOKMARK,
-                                                            14.0,
+                                                            16.0,
                                                             if self.sidebar_mode == crate::views::sidebar::SidebarMode::Bookmarks {
                                                                 theme.accent
                                                             } else {
@@ -929,7 +941,7 @@ if let Some(new_scroll) = new_active_scroll {
                                                         .hover(|h| h.bg(theme.bg_hover))
                                                         .child(icons::icon(
                                                             icons::ICON_HISTORY,
-                                                            14.0,
+                                                            16.0,
                                                             if self.sidebar_mode == crate::views::sidebar::SidebarMode::RecentFiles {
                                                                 theme.accent
                                                             } else {
@@ -964,7 +976,7 @@ if let Some(new_scroll) = new_active_scroll {
                                                                 .hover(|h| h.bg(theme.bg_hover))
                                                                 .child(icons::icon(
                                                                     icon_asset,
-                                                                    14.0,
+                                                                    16.0,
                                                                     if is_active {
                                                                         theme.accent
                                                                     } else {
@@ -1001,23 +1013,11 @@ if let Some(new_scroll) = new_active_scroll {
                                 .border_color(theme.border)
                                 .bg(theme.bg_sidebar)
                                 .child(
-                                    div()
-                                        .id("btn-toggle-sidebar")
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .p_1()
-                                        .rounded_md()
-                                        .cursor_pointer()
-                                        .hover(|h| h.bg(theme.bg_hover))
-                                        .child(icons::icon(
-                                            icons::ICON_PANEL_LEFT,
-                                            15.0,
-                                            theme.text_muted,
-                                        ))
-                                        .on_click(cx.listener(|this, _, _, cx| {
-                                            this.toggle_sidebar(cx);
-                                        })),
+                                    self.render_sidebar_toggle_button(
+                                        theme.text_muted,
+                                        theme,
+                                        cx,
+                                    ),
                                 ),
                         )
                     })
@@ -1032,7 +1032,10 @@ if let Some(new_scroll) = new_active_scroll {
                                 .flex_shrink_0()
                                 .bg(resizer_color)
                                 .border_b_1()
-                                .border_color(theme.border)
+                                // Match the vertical line so the accent color reaches the
+                                // titlebar's bottom edge instead of stopping one pixel short
+                                // under the horizontal border.
+                                .border_color(resizer_color)
                                 .child(
                                     div()
                                         .id("titlebar-resizer-hitbox")
@@ -1078,7 +1081,7 @@ if let Some(new_scroll) = new_active_scroll {
                                 .flex_shrink_0()
                                 .bg(right_resizer_color)
                                 .border_b_1()
-                                .border_color(theme.border)
+                                .border_color(right_resizer_color)
                                 .child(
                                     div()
                                         .id("titlebar-right-resizer-hitbox")
@@ -1297,7 +1300,28 @@ if let Some(new_scroll) = new_active_scroll {
                                             (self.t("sidebar.recent_files"), Some(actions))
                                         }
                                         crate::views::sidebar::SidebarMode::Search => {
-                                            (self.t("sidebar.search_title"), None)
+                                            // Same action row as the other sections:
+                                            // its buttons give the header the same height,
+                                            // so the input below does not shift when the
+                                            // sidebar switches sections.
+                                            let actions = div()
+                                                .flex()
+                                                .flex_row()
+                                                .items_center()
+                                                .gap_1()
+                                                .child(
+                                                    div()
+                                                        .id("btn-search-settings")
+                                                        .p_1()
+                                                        .rounded_md()
+                                                        .cursor_pointer()
+                                                        .hover(|h| h.bg(theme.bg_hover))
+                                                        .child(icons::icon(icons::ICON_SLIDERS, 14.0, theme.text_muted))
+                                                        .on_click(cx.listener(|this, _, _, cx| {
+                                                            this.open_settings(None, cx);
+                                                        })),
+                                                );
+                                            (self.t("sidebar.search_title"), Some(actions))
                                         }
                                         _ => (String::new(), None),
                                     };
@@ -1569,6 +1593,43 @@ if let Some(new_scroll) = new_active_scroll {
                             .flex_shrink_0()
                             .gap_4()
                             .items_center()
+                            // Live sync pass sits before the index chip: the
+                            // user sees what the toolbar button started, and
+                            // the spinner disappears when the pass settles.
+                            .when_some(self.sync_status_bar(), |s, (icon, label)| {
+                                let icon = icons::icon(icon, 12.0, theme.text_muted).with_animation(
+                                    SharedString::from("sync-status-spinner"),
+                                    gpui::Animation::new(Duration::from_millis(900)).repeat(),
+                                    |icon, delta| {
+                                        icon.with_transformation(gpui::Transformation::rotate(
+                                            gpui::radians(delta * std::f32::consts::TAU),
+                                        ))
+                                    },
+                                );
+                                s.child(
+                                    div()
+                                        .id("status-sync")
+                                        .flex()
+                                        .items_center()
+                                        .gap_1p5()
+                                        .text_color(theme.text_muted)
+                                        .child(
+                                            div()
+                                                .w(px(14.0))
+                                                .h(px(14.0))
+                                                .flex()
+                                                .items_center()
+                                                .justify_center()
+                                                .child(icon),
+                                        )
+                                        .child(
+                                            div()
+                                                .max_w(px(320.0))
+                                                .truncate()
+                                                .child(label),
+                                        )
+                                )
+                            })
                             // Index status chip, ALWAYS visible with a vault
                             // open: "Indexing NN%" while the background build
                             // runs, "Index ready" afterwards — so "is it

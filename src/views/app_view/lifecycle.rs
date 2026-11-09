@@ -628,6 +628,7 @@ impl AppView {
     /// and frees document buffers on application shutdown.
     pub fn prepare_shutdown(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.state.save_dirty_documents();
+        self.state.sync.close();
         self.catalog_window_manager.close_if_open(cx);
         self.settings_window_manager.close_if_open(cx);
         self.unload_all_plugins();
@@ -796,6 +797,69 @@ impl AppView {
         }
     }
 
+    /// Polls the background sync service so the status bar shows a running
+    /// pass even when no other UI event triggers a repaint.
+    pub fn poll_sync_status(&mut self, cx: &mut Context<Self>) {
+        let revision = self.state.sync.revision();
+        if self.last_sync_revision == Some(revision) {
+            return;
+        }
+        self.last_sync_revision = Some(revision);
+        let done = self.state.sync.last();
+        if done != self.last_sync_done {
+            self.last_sync_done = done;
+            if done.is_some() {
+                // The fs watcher usually sees pulled files too, but a pass
+                // that only created folders may not produce a file event.
+                self.reload_file_tree_async(cx);
+            }
+        }
+        let status = self.state.sync.status();
+        if self.last_sync_status.as_ref() != Some(&status) {
+            self.last_sync_status = Some(status);
+            cx.notify();
+        }
+    }
+
+    /// Status-bar representation of a running sync pass: the sync icon spins
+    /// and the label names the current stage and file count. Reads the
+    /// polled snapshot instead of locking the service on every frame.
+    pub(super) fn sync_status_bar(&self) -> Option<(&'static str, String)> {
+        use crate::sync::progress::Stage;
+        match self.last_sync_status.as_ref()? {
+            crate::sync::SyncStatus::Running(progress) => {
+                let label = if progress.total == 0 {
+                    self.t("settings.sync.running")
+                } else {
+                    let (key, count) = match progress.stage() {
+                        Stage::Download(count) => ("settings.sync.downloading", count),
+                        Stage::Upload(count) => ("settings.sync.uploading", count),
+                        Stage::Other(count) => ("settings.sync.syncing", count),
+                    };
+                    let (done, total) = (count.done.to_string(), count.total.to_string());
+                    self.t_fmt("settings.sync.progress", &[&self.t(key), &done, &total])
+                };
+                Some((icons::ICON_REFRESH, label))
+            }
+            crate::sync::SyncStatus::Login => {
+                Some((icons::ICON_REFRESH, self.t("settings.sync.login")))
+            }
+            crate::sync::SyncStatus::Offline => {
+                Some((icons::ICON_TRIANGLE_ALERT, self.t("settings.sync.offline")))
+            }
+            crate::sync::SyncStatus::Failed(error) => {
+                Some((icons::ICON_TRIANGLE_ALERT, error.clone()))
+            }
+            crate::sync::SyncStatus::Unsynced { first, .. } => {
+                Some((icons::ICON_TRIANGLE_ALERT, first.clone()))
+            }
+            crate::sync::SyncStatus::Deletions { .. } => {
+                Some((icons::ICON_TRIANGLE_ALERT, self.t("settings.sync.allow_deletions")))
+            }
+            _ => None,
+        }
+    }
+
     /// Registers OS window observers (e.g. activation / focus change) to handle
     /// background cursor blink pausing and reliable save-on-blur / save-on-minimize.
     pub fn init_window_observers(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -823,6 +887,15 @@ impl AppView {
     /// Toggles the left sidebar visibility.
     pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         self.sidebar_collapsed = !self.sidebar_collapsed;
+        cx.notify();
+    }
+
+    /// Toggles "always on top" for the window and persists it in the session.
+    pub fn toggle_always_on_top(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.always_on_top = !self.always_on_top;
+        self.state.session.always_on_top = self.always_on_top;
+        self.state.save_session_state();
+        crate::window_ops::set_always_on_top(window, self.always_on_top);
         cx.notify();
     }
 

@@ -11,7 +11,7 @@ dirs = "6.0"
 rfd = "0.15"
 uuid = { version = "1.23", features = ["v4"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff", "ico"] }
-time = { version = "0.3", features = ["local-offset"] }
+time = { version = "0.3", features = ["local-offset", "macros", "formatting", "parsing"] }
 tiny-skia = "0.11"
 cosmic-text = "0.14"
 oxipng = { version = "9.1", default-features = false }
@@ -25,18 +25,28 @@ rquickjs = "0.8"
 ureq = { version = "2.10", features = ["json"] }
 sha2 = "0.10"
 memchr = "2"
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+url = "2"
+base64 = "0.22"
+getrandom = "0.2"
 crop = { version = "0.4", features = ["utf16-metric", "graphemes"] }
 notify = "8"
 typst = "0.15.1"
 typst-pdf = "0.15.1"
 typst-layout = "0.15.1"
 typst-assets = "0.15.1"
+raw-window-handle = "0.6"
 
 # libc 0.2.190 crashes on Linux. The lockfile alone keeps builds on 0.2.189,
 # but an exact requirement stops `cargo update` from bumping it again. The
 # Windows build does not compile this target at all.
 [target.'cfg(unix)'.dependencies]
 libc = "=0.2.189"
+
+# Always-on-top sends an EWMH _NET_WM_STATE client message over the xcb
+# connection GPUI already owns (allow-unsafe-code unlocks the raw FFI wrapper).
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { version = "0.13", features = ["allow-unsafe-code"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
@@ -45,6 +55,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Memory",
     "Win32_System_Ole",
     "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 [build-dependencies]
@@ -53,7 +64,7 @@ winres = "0.1"
 [dev-dependencies]
 tempfile = "3"
 
-# GPUI 0.2.2 is vendored (see vendor/gpui) with four Windows fixes.
+# GPUI 0.2.2 is vendored (see vendor/gpui) with the following fixes.
 #
 # 1. Frame loop: upstream re-presents the cached scene on EVERY vsync tick for one
 # second after the last input event ("to prevent the display from underclocking
@@ -83,6 +94,32 @@ tempfile = "3"
 # The old presence-only check never applied a change between two non-null cursors,
 # so the icon kept the previous style until the next mouse move — visible when
 # crossing a pointer/I-beam boundary, such as the inline rename field.
+#
+# 5. Text ellipsis: the text layout cache now keys on the truncation width as well,
+# and every measure pass starts from the original runs. A nowrap label measured
+# narrow before flex grew it kept that truncation forever — cut short and without
+# the "…" — and re-measuring it with the final width sliced the runs at a
+# non-char boundary (panic in the DirectWrite shaper).
+#
+# 6. X11 raw window handle: `HasWindowHandle` / `HasDisplayHandle` for `X11Window`
+# were `unimplemented!()`, so the app could not reach the xcb window to set EWMH
+# window state. They now return the XCB window id and the existing xcb
+# connection, which `src/window_ops.rs` uses for always-on-top.
+#
+# 7. Windows window drag: `PlatformWindow::start_window_move` posts
+# `WM_NCLBUTTONDOWN`/`HTCAPTION` instead of running `DefWindowProcW` inline.
+# The inline call starts a modal move loop while a view callback still holds the
+# app `RefCell`, so the next `WM_TIMER`/`WM_MOVE` panics with "RefCell already
+# borrowed".
+#
+# 8. X11 initial state and placement: `zoom()` before `MapWindow` writes the
+# `_NET_WM_STATE` property (EWMH honors its initial value at map time) instead
+# of sending a client message the WM drops for an unmanaged window, so a
+# restored maximized window no longer flashes its windowed size first. New
+# windows also carry a `USPosition` hint, otherwise the WM picks the position
+# itself and the saved geometry never comes back; `ConfigureNotify` coordinates
+# are translated to the root because a reparenting WM reports them relative to
+# its frame.
 [patch.crates-io]
 gpui = { path = "vendor/gpui" }
 

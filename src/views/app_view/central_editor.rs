@@ -669,7 +669,7 @@ impl AppView {
                         this.is_mouse_selecting = false;
                         this.start_editor_middle_scroll(cx);
                     }))
-                    .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                    .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, window, cx| {
                         if this.is_resizing_sidebar {
                             let x: f32 = event.position.x.into();
                             if x < 100.0 {
@@ -705,7 +705,29 @@ impl AppView {
                         } else if let Some(drag) = this.table_col_resize_drag.clone() {
                             let x: f32 = event.position.x.into();
                             let delta = x - drag.start_x;
-                            let new_w = (drag.start_width + delta).max(40.0);
+                            // A table may not grow past the note column: otherwise its
+                            // right edge runs under the pale width-limit band or off the
+                            // pane edge instead of stopping at it.
+                            let win_w: f32 = window.viewport_size().width.into();
+                            let char_w = if line_char_width > 1.0 { line_char_width } else { 7.7 };
+                            let room = (this.compute_wrap_cols_for_leaf(leaf_id, win_w, line_char_width)
+                                as f32
+                                * char_w)
+                                .max(160.0);
+                            let other_widths: f32 = this
+                                .manual_table_col_widths
+                                .get(&drag.table_first_line)
+                                .map(|widths| {
+                                    widths
+                                        .iter()
+                                        .enumerate()
+                                        .filter(|(idx, _)| *idx != drag.col_idx)
+                                        .map(|(_, w)| *w)
+                                        .sum()
+                                })
+                                .unwrap_or(0.0);
+                            let max_w = (room - other_widths).max(40.0);
+                            let new_w = (drag.start_width + delta).clamp(40.0, max_w);
                             if let Some(widths) = this.manual_table_col_widths.get_mut(&drag.table_first_line) {
                                 if drag.col_idx < widths.len() {
                                     widths[drag.col_idx] = new_w;
@@ -1778,14 +1800,16 @@ impl AppView {
                 let v_line_idx = v.line_idx;
                 let v_sub_idx = v.sub_idx;
 
-                let copy_payload: Option<(usize, usize)> =
-                    if is_opening_fence && !is_in_active_block {
-                        code_states_arc[v.line_idx]
-                            .as_ref()
-                            .map(|st| (st.block_id, v.line_idx))
-                    } else {
-                        None
-                    };
+                // The button stays on the opening fence row for as long as the
+                // block exists, including while it is being edited: clicking a
+                // block must not take the button away from the user.
+                let copy_payload: Option<(usize, usize)> = if is_opening_fence {
+                    code_states_arc[v.line_idx]
+                        .as_ref()
+                        .map(|st| (st.block_id, v.line_idx))
+                } else {
+                    None
+                };
 
                 if is_opening_fence {
                     if let Some(st) = code_states_arc[v.line_idx].as_ref() {
@@ -1851,7 +1875,18 @@ impl AppView {
                     let hl_top = if image_text_band {
                         image_band_top
                     } else if let Some(tbl) = grid_tbl {
-                        if v.line_idx == tbl.first_line { crate::markdown::TABLE_EDGE_MARGIN } else { 0.0 }
+                        let edge_top = if v.line_idx == tbl.first_line {
+                            crate::markdown::TABLE_EDGE_MARGIN
+                        } else {
+                            0.0
+                        };
+                        // A wrapped cell paints several sub-lines. The current
+                        // line is the one holding the caret, not the whole tall
+                        // row the cell spans.
+                        edge_top
+                            + row_layout.top_for_column(
+                                row_layout.column_for_line_char(v_char_start + active_col_in_row),
+                            )
                     } else {
                         0.0
                     };
@@ -1859,13 +1894,8 @@ impl AppView {
                         1.0
                     } else if image_text_band {
                         h_metrics_row_h
-                    } else if let Some(tbl) = grid_tbl {
-                        let edge_bottom = if v.line_idx == tbl.last_line {
-                            crate::markdown::TABLE_EDGE_MARGIN
-                        } else {
-                            0.0
-                        };
-                        (row_h - hl_top - edge_bottom).max(typography.table_line_height)
+                    } else if grid_tbl.is_some() {
+                        typography.table_line_height
                     } else {
                         row_h
                     };
@@ -2377,13 +2407,11 @@ impl AppView {
                     h_metrics_row_h
                 } else if is_tbl_sep {
                     0.0
-                } else if let Some(tbl) = grid_tbl {
-                    let edge_bottom = if v_line_idx == tbl.last_line {
-                        crate::markdown::TABLE_EDGE_MARGIN
-                    } else {
-                        0.0
-                    };
-                    (row_h - line_num_top - edge_bottom).max(typography.table_line_height)
+                } else if grid_tbl.is_some() {
+                    // A table row is one document line however tall its wrapped
+                    // cells make it: the number belongs to the first painted
+                    // line, not to the middle of the whole row.
+                    typography.table_line_height + 2.0 * crate::markdown::TABLE_PAD_Y
                 } else {
                     row_h
                 };
@@ -2700,7 +2728,7 @@ impl AppView {
                                     div()
                                         .id(gpui::ElementId::Name(format!("code-copy-{}-{}", lid_tag, v_idx).into()))
                                         .absolute()
-                                        .right(px(6.0))
+                                        .right_0()
                                         .top_0()
                                         .h(px(row_h))
                                         .flex()

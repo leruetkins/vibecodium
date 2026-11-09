@@ -20,6 +20,7 @@ mod table_layout;
 mod row_shape;
 mod paint;
 mod render;
+mod sidebar_toggle;
 mod central_editor;
 mod tab_bar;
 mod tabs;
@@ -130,6 +131,15 @@ pub struct AppView {
     >,
     pub sidebar_width: f32,
     pub sidebar_collapsed: bool,
+    /// Window pinned above all other windows (toggled by right-clicking the
+    /// sidebar button in the titlebar).
+    pub always_on_top: bool,
+    /// Press position on the titlebar sidebar button while it may still turn
+    /// into a window drag.
+    pub sidebar_press_origin: Option<gpui::Point<Pixels>>,
+    /// True once a press on that button became a window drag, so the click
+    /// that follows does not also toggle the sidebar.
+    pub sidebar_drag_started: bool,
     pub is_resizing_sidebar: bool,
     pub is_hovering_resizer: bool,
     pub selected_sidebar_folder: Option<PathBuf>,
@@ -246,6 +256,14 @@ pub struct AppView {
     /// Last index-build percent shown in the status bar (`None` — idle);
     /// change detection for the 150 ms poll loop's notify.
     last_build_progress: Option<u8>,
+    /// Last sync status shown in the status bar (`None` until the first
+    /// poll); change detection for the same 150 ms notify.
+    last_sync_status: Option<crate::sync::SyncStatus>,
+    /// Last observed sync revision. The service bumps it on real state
+    /// changes, so polling avoids locking and filesystem checks while idle.
+    last_sync_revision: Option<u64>,
+    /// Last completed sync time; a change means the tree may have new paths.
+    last_sync_done: Option<u64>,
     /// Document line at the top of the viewport, refreshed once per frame.
     ///
     pub(crate) table_layouts: std::cell::RefCell<HashMap<usize, (u64, Arc<TableLayout>)>>,
@@ -390,8 +408,10 @@ pub struct AppView {
 
 impl AppView {
     /// Creates and initializes a new AppView instance with loaded configuration.
-    pub fn new(cx: &mut Context<Self>) -> Self {
-        let state = AppState::new();
+    /// `vault_override` opens that vault for this run without persisting the
+    /// session, so the default vault stays unchanged.
+    pub fn new(cx: &mut Context<Self>, vault_override: Option<PathBuf>) -> Self {
+        let state = AppState::new_with_vault(vault_override);
         let config = state.settings.get_config();
         let theme = Theme::from_ui(&config.ui, None);
         let ws = crate::state::WindowState::load(&crate::state::app_data_dir());
@@ -436,6 +456,7 @@ impl AppView {
             sidebar_mode
         };
         let recent_files_sort_order = state.session.recent_files_sort_order;
+        let always_on_top = state.session.always_on_top;
         let settings_model = cx.new(|_cx| {
             crate::settings::SettingsModel::new(state.settings.clone())
         });
@@ -489,6 +510,9 @@ impl AppView {
             caption_numbers_cache: std::cell::RefCell::new(None),
             sidebar_width,
             sidebar_collapsed: false,
+            always_on_top,
+            sidebar_press_origin: None,
+            sidebar_drag_started: false,
             is_resizing_sidebar: false,
             is_hovering_resizer: false,
             selected_sidebar_folder: None,
@@ -540,6 +564,9 @@ impl AppView {
             panel_search_seq: 0,
             panel_debounce_epoch: 0,
             last_build_progress: None,
+            last_sync_status: None,
+            last_sync_revision: None,
+            last_sync_done: None,
             sidebar_middle_active: false,
             plugin_modal_scrollbar_drag: crate::views::scrollbar::ScrollbarDrag::default(),
             plugin_modal_middle_active: false,
@@ -722,17 +749,16 @@ impl AppView {
         click_x: f32,
         current_widths: &[f32],
     ) {
-        let entry = self
-            .manual_table_col_widths
-            .entry(table_first_line)
-            .or_insert_with(|| current_widths.to_vec());
-        if entry.len() != current_widths.len() {
-            *entry = current_widths.to_vec();
-        }
-        let start_width = entry
+        // The gesture continues from the widths that are painted right now: when
+        // the room shrank, the manual values were already scaled down for display,
+        // and starting from the previous (larger) width would make the divider
+        // jump on the first move.
+        self.manual_table_col_widths
+            .insert(table_first_line, current_widths.to_vec());
+        let start_width = current_widths
             .get(col_idx)
             .copied()
-            .unwrap_or(current_widths.get(col_idx).copied().unwrap_or(100.0));
+            .unwrap_or(100.0);
         self.table_col_resize_drag = Some(TableColResizeDrag {
             table_first_line,
             col_idx,

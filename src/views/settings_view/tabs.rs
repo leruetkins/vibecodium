@@ -1,5 +1,10 @@
 use super::*;
 
+use gpui::AnimationExt;
+
+use crate::settings::SyncSettings;
+use crate::sync::{Large, SyncStatus};
+
 impl SettingsView {
     /// Pixels the editor will use at the current slider position in the main
     /// window, so the settings stepper matches the status bar.
@@ -3281,4 +3286,856 @@ impl SettingsView {
             .child(content_section)
             .child(settings_section)
     }
+
+
+    // =========================================================================
+    // Dropbox Sync Tab (Aquilum layout)
+    // =========================================================================
+
+    fn sync_card(&self, title: &str, rows: Vec<gpui::Div>) -> gpui::Div {
+        let theme = &self.theme;
+        let count = rows.len();
+        let rows = rows.into_iter().enumerate().map(|(index, row)| {
+            if index + 1 == count {
+                row.border_b_0()
+            } else {
+                row
+            }
+        });
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .text_xs()
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(theme.text_secondary)
+                    .child(title.to_string()),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .bg(theme.bg_card)
+                    .rounded_lg()
+                    .border_1()
+                    .border_color(theme.border_subtle)
+                    .px_4()
+                    .children(rows),
+            )
+    }
+
+    fn sync_row(&self, label: &str, hint: Option<&str>, control: impl IntoElement) -> gpui::Div {
+        let theme = &self.theme;
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .py_3()
+            .border_b_1()
+            .border_color(theme.border_subtle)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .mr_4()
+                    .gap_0p5()
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(theme.text_secondary)
+                            .child(label.to_string()),
+                    )
+                    .when_some(hint, |this, hint| {
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(theme.text_muted)
+                                .child(hint.to_string()),
+                        )
+                    }),
+            )
+            .child(div().flex_none().child(control))
+    }
+
+    fn sync_button(&self, id: impl Into<gpui::ElementId>, label: String, primary: bool) -> gpui::Stateful<gpui::Div> {
+        let theme = &self.theme;
+        let base = div()
+            .id(id)
+            .px_2p5()
+            .py_1()
+            .rounded_md()
+            .cursor_pointer()
+            .text_xs()
+            .font_weight(gpui::FontWeight::SEMIBOLD);
+        let base = if primary {
+            base.bg(theme.accent).text_color(theme.text_on_accent)
+        } else {
+            base.bg(theme.bg_sidebar)
+                .border_1()
+                .border_color(theme.border)
+                .text_color(theme.text_secondary)
+                .hover(|hover| hover.bg(theme.bg_hover))
+        };
+        base.child(label)
+    }
+
+    fn sync_icon_button(&self, id: impl Into<gpui::ElementId>, icon: &'static str) -> gpui::Stateful<gpui::Div> {
+        let theme = &self.theme;
+        div()
+            .id(id)
+            .w(px(28.0))
+            .h(px(28.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded_md()
+            .cursor_pointer()
+            .text_color(theme.text_secondary)
+            .hover(|hover| hover.bg(theme.bg_hover))
+            .child(icons::icon(icon, 14.0, theme.text_secondary))
+    }
+
+    fn sync_status_text(&self, status: &SyncStatus, last: Option<u64>) -> String {
+        match status {
+            SyncStatus::Off(None) => self.t("settings.sync.off"),
+            SyncStatus::Off(Some(error)) | SyncStatus::Failed(error) => error.clone(),
+            SyncStatus::Login => self.t("settings.sync.login"),
+            SyncStatus::Deletions { planned, synced } => {
+                let (planned, synced) = (planned.to_string(), synced.to_string());
+                self.t_fmt("settings.sync.deletions", &[&planned, &synced])
+            }
+            SyncStatus::Offline => self.t("settings.sync.offline"),
+            SyncStatus::Unsynced { files, first } => {
+                let files = self.sync_file_count(*files as u64);
+                self.t_fmt("settings.sync.unsynced", &[&files, first])
+            }
+            SyncStatus::Running(_) | SyncStatus::Ready => match last {
+                Some(at) => self.t_fmt("settings.sync.done", &[&format_sync_time(at)]),
+                None => self.t("settings.sync.connected"),
+            },
+        }
+    }
+
+    fn sync_progress_text(&self, progress: &crate::sync::progress::Progress) -> String {
+        use crate::sync::progress::Stage;
+        let (key, count) = match progress.stage() {
+            Stage::Download(count) => ("settings.sync.downloading", count),
+            Stage::Upload(count) => ("settings.sync.uploading", count),
+            Stage::Other(count) => ("settings.sync.syncing", count),
+        };
+        if count.total == 0 {
+            return self.t("settings.sync.running");
+        }
+        let (done, total) = (count.done.to_string(), count.total.to_string());
+        self.t_fmt("settings.sync.progress", &[&self.t(key), &done, &total])
+    }
+
+    /// Countdown under the schedule row, rounded up to whole seconds like the
+    /// native settings countdown.
+    fn sync_countdown(&self, due: std::time::Instant) -> String {
+        let left = due.saturating_duration_since(std::time::Instant::now());
+        let seconds = left.as_secs() + u64::from(left.subsec_nanos() > 0);
+        let time = format!("{}:{:02}", seconds / 60, seconds % 60);
+        self.t_fmt("settings.sync.next", &[&time])
+    }
+
+    fn sync_file_count(&self, count: u64) -> String {
+        let forms = [
+            self.t("settings.sync.file_one"),
+            self.t("settings.sync.file_few"),
+            self.t("settings.sync.file_many"),
+        ];
+        let noun = forms[crate::i18n::plural_form(&self.config.ui.language, count).min(forms.len() - 1)].clone();
+        format!("{count} {noun}")
+    }
+
+    fn sync_bytes(&self, bytes: u64) -> String {
+        let units = [
+            self.t("settings.sync.unit_b"),
+            self.t("settings.sync.unit_kb"),
+            self.t("settings.sync.unit_mb"),
+            self.t("settings.sync.unit_gb"),
+            self.t("settings.sync.unit_tb"),
+        ];
+        let mut value = bytes as f64;
+        let mut unit = 0;
+        while value >= 1024.0 && unit + 1 < units.len() {
+            value /= 1024.0;
+            unit += 1;
+        }
+        if unit == 0 {
+            return format!("{bytes} {}", units[0]);
+        }
+        let decimals = if value < 10.0 { 2 } else { 1 };
+        let number = format!("{value:.decimals$}");
+        let separator = self.t("settings.sync.decimal_separator");
+        let number = if separator == "." { number } else { number.replace('.', &separator) };
+        format!("{number} {}", units[unit])
+    }
+
+    fn sync_interval_label(&self, settings: &SyncSettings) -> String {
+        if !settings.enabled || settings.interval == 0 {
+            return self.t("settings.sync.every.0");
+        }
+        if settings.interval != SYNC_CUSTOM && SYNC_INTERVALS.contains(&settings.interval) {
+            return self.t(&format!("settings.sync.every.{}", settings.interval));
+        }
+        let (value, unit) = SyncIntervalUnit::from_seconds(settings.interval);
+        self.t_fmt(
+            "settings.sync.custom_value",
+            &[&value.to_string(), &self.t(unit.label_key())],
+        )
+    }
+
+    fn render_sync_custom_editor(&self, window: &Window, cx: &Context<Self>) -> gpui::Div {
+        let theme = &self.theme;
+        let focused = self.sync_custom_focus_handle.is_focused(window);
+        let input = self.sync_custom_input.render(
+            "",
+            theme,
+            window,
+            window.scale_factor(),
+            12.0,
+            "Segoe UI",
+        );
+        let text = self.sync_custom_input.text();
+        let text_width = if text.is_empty() {
+            0.0
+        } else {
+            let run = gpui::TextRun {
+                len: text.len(),
+                font: gpui::font("Segoe UI"),
+                color: Default::default(),
+                underline: Default::default(),
+                strikethrough: None,
+                background_color: None,
+            };
+            let shaped = window.text_system().shape_line(
+                SharedString::from(text.to_string()),
+                px(12.0),
+                &[run],
+                None,
+            );
+            f32::from(shaped.x_for_index(text.len()))
+        };
+        let center_offset = ((56.0 - text_width) / 2.0).max(0.0);
+
+        let field = div()
+            .id("sync-custom-value")
+            .track_focus(&self.sync_custom_focus_handle)
+            .flex()
+            .flex_row()
+            .items_center()
+            .w(px(56.0))
+            .h(px(24.0))
+            .pl(px(center_offset))
+            .cursor(gpui::CursorStyle::IBeam)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    window.focus(&this.sync_custom_focus_handle);
+                    this.sync_custom_input.handle_mouse_down(event, window, 12.0, "Segoe UI");
+                    this.sync_custom_input.enable_blink(
+                        |s: &mut SettingsView| &mut s.sync_custom_input.blink,
+                        cx,
+                    );
+                    this.sync_custom_input.pause_and_show(
+                        |s: &mut SettingsView| &mut s.sync_custom_input.blink,
+                        cx,
+                    );
+                    cx.notify();
+                }),
+            )
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+                if this.sync_custom_input.is_mouse_selecting {
+                    let before = this.sync_custom_input.cursor_pos;
+                    this.sync_custom_input.handle_mouse_move(event, window, 12.0, "Segoe UI");
+                    if this.sync_custom_input.cursor_pos != before {
+                        this.sync_custom_input.pause_and_show(
+                            |s: &mut SettingsView| &mut s.sync_custom_input.blink,
+                            cx,
+                        );
+                        cx.notify();
+                    }
+                }
+            }))
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                if this.sync_custom_input.is_mouse_selecting {
+                    this.sync_custom_input.handle_mouse_up();
+                    cx.notify();
+                }
+            }))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                if this.sync_custom_input.is_mouse_selecting {
+                    this.sync_custom_input.handle_mouse_up();
+                    cx.notify();
+                }
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                cx.stop_propagation();
+                let key = event.keystroke.key.as_str();
+                if key == "enter" {
+                    this.commit_sync_custom(cx);
+                    window.focus(&this.focus_handle);
+                    return;
+                }
+                if key == "escape" {
+                    this.cancel_sync_custom(cx);
+                    window.focus(&this.focus_handle);
+                    return;
+                }
+                if this.sync_custom_input.handle_key_down(event, cx) {
+                    this.sync_custom_input.pause_and_show(
+                        |s: &mut SettingsView| &mut s.sync_custom_input.blink,
+                        cx,
+                    );
+                }
+                cx.notify();
+            }))
+            .child(input);
+
+        let current_value = self.sync_custom_input.text().trim().parse::<u64>().unwrap_or(1);
+        let minus_enabled = current_value > 1;
+        let step_button = |id: &'static str, label: &'static str, enabled: bool| {
+            div()
+                .id(id)
+                .flex()
+                .items_center()
+                .justify_center()
+                .w(px(24.0))
+                .h(px(24.0))
+                .rounded_sm()
+                .when(enabled, |d| d.cursor_pointer().hover(|h| h.bg(theme.bg_hover)))
+                .when(!enabled, |d| d.opacity(0.35).cursor_not_allowed())
+                .child(div().text_sm().text_color(theme.text_secondary).child(label))
+        };
+        let minus = step_button("sync-custom-minus", "−", minus_enabled).on_click(cx.listener(
+            move |this, _, _, cx| {
+                if this.sync_custom_input.text().trim().parse::<u64>().unwrap_or(1) > 1 {
+                    this.step_sync_custom(-1, cx);
+                }
+            },
+        ));
+        let plus = step_button("sync-custom-plus", "+", true)
+            .on_click(cx.listener(|this, _, _, cx| this.step_sync_custom(1, cx)));
+
+        let stepper = div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap_1()
+            .bg(theme.bg_sidebar)
+            .border_1()
+            .border_color(if focused { theme.accent } else { theme.border })
+            .rounded_md()
+            .p_0p5()
+            .child(minus)
+            .child(field)
+            .child(plus);
+
+        let unit_control = div()
+            .relative()
+            .child(
+                div()
+                    .id("sync-custom-unit-btn")
+                    .cursor_pointer()
+                    .child(self.render_select_pill(&self.t(self.sync_custom_unit.label_key())))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        if this.sync_unit_popup_is_open() {
+                            this.close_sync_unit_popup(cx);
+                        } else {
+                            this.open_sync_unit_popup(window, cx);
+                        }
+                    })),
+            )
+            .when_some(self.sync_unit_popup.clone(), |parent, popup| {
+                parent.child(
+                    gpui::deferred(
+                        div()
+                            .id("sync-custom-unit-menu")
+                            .absolute()
+                            .top_full()
+                            .right_0()
+                            .mt_1()
+                            .child(popup),
+                    )
+                    .with_priority(999),
+                )
+            });
+
+        div()
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .items_center()
+            .gap_2()
+            .child(stepper)
+            .child(unit_control)
+    }
+
+    fn sync_large_row(&self, large: &Large, root: &Path, cx: &Context<Self>) -> gpui::Div {
+        let path = large.path.clone();
+        let place = if large.ignored {
+            self.t("settings.sync.ignored")
+        } else if large.kept {
+            self.t("settings.sync.on_device")
+        } else {
+            self.t("settings.sync.in_cloud")
+        };
+        let description = format!("{} · {place}", self.sync_bytes(large.size));
+        let mut buttons = div().flex().flex_row().items_center().gap_1();
+
+        if large.kept && !large.ignored {
+            let path_for_send = path.clone();
+            buttons = buttons.child(
+                self.sync_icon_button(
+                    gpui::ElementId::from(gpui::SharedString::from(format!("sync-send-{path}"))),
+                    icons::ICON_UPLOAD,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if let Some(app) = this.weak_app.upgrade() {
+                        let path = path_for_send.clone();
+                        app.update(cx, |app, _| app.state.sync.allow(vec![path]));
+                    }
+                    cx.notify();
+                })),
+            );
+        }
+
+        let root_for_reveal = root.to_path_buf();
+        let path_for_reveal = path.clone();
+        buttons = buttons.child(
+            self.sync_icon_button(
+                gpui::ElementId::from(gpui::SharedString::from(format!("sync-reveal-{path}"))),
+                icons::ICON_FOLDER,
+            )
+            .on_click(cx.listener(move |_this, _, _, _cx| {
+                crate::views::sidebar::folder_actions::show_in_explorer(&root_for_reveal.join(&path_for_reveal));
+            })),
+        );
+
+        let path_for_action = path.clone();
+        if large.ignored {
+            buttons = buttons.child(
+                self.sync_icon_button(
+                    gpui::ElementId::from(gpui::SharedString::from(format!("sync-resume-{path}"))),
+                    icons::ICON_REFRESH,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if let Some(app) = this.weak_app.upgrade() {
+                        let path = path_for_action.clone();
+                        app.update(cx, |app, _| app.state.sync.unignore(vec![path]));
+                    }
+                    cx.notify();
+                })),
+            );
+        } else {
+            buttons = buttons.child(
+                self.sync_icon_button(
+                    gpui::ElementId::from(gpui::SharedString::from(format!("sync-ignore-{path}"))),
+                    icons::ICON_CLOSE,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if let Some(app) = this.weak_app.upgrade() {
+                        let path = path_for_action.clone();
+                        app.update(cx, |app, _| app.state.sync.ignore(vec![path]));
+                    }
+                    cx.notify();
+                })),
+            );
+        }
+
+        self.sync_row(&path, Some(&description), buttons)
+    }
+
+    pub(super) fn render_sync_tab(&self, window: &Window, cx: &Context<Self>) -> gpui::Div {
+        let theme = &self.theme;
+        let (workspace, settings, status, large, size, last, due) = if let Some(app) = self.weak_app.upgrade() {
+            let app = app.read(cx);
+            let settings = app
+                .state
+                .workspace_path
+                .as_ref()
+                .map(|root| app.state.sync_settings_for(root))
+                .unwrap_or_default();
+            (
+                app.state.workspace_path.clone(),
+                settings,
+                app.state.sync.status(),
+                app.state.sync.large(),
+                app.state.sync.size(),
+                app.state.sync.last(),
+                app.state.sync.due(),
+            )
+        } else {
+            (
+                None,
+                SyncSettings::default(),
+                SyncStatus::Off(None),
+                Vec::new(),
+                Default::default(),
+                None,
+                None,
+            )
+        };
+
+        let status_text = self.sync_status_text(&status, last);
+        let mut blocks = Vec::new();
+
+        let mut actions = div().flex().flex_row().items_center().gap_2();
+        match &status {
+            SyncStatus::Off(_) => {
+                actions = actions.child(
+                    self.sync_button("sync-connect", self.t("settings.sync.connect"), false).on_click(cx.listener(
+                        |this, _, _, cx| {
+                            if let Some(app) = this.weak_app.upgrade() {
+                                match app.update(cx, |app, _| app.state.sync.connect()) {
+                                    Ok(url) => cx.open_url(&url),
+                                    Err(error) => {
+                                        let message = format!("Dropbox sign-in failed: {error}");
+                                        let _ = app.update(cx, |app, _| app.state.status_text = message.clone());
+                                    }
+                                }
+                            }
+                            cx.notify();
+                        },
+                    )),
+                );
+            }
+            SyncStatus::Login => {
+                actions = actions.child(
+                    self.sync_button("sync-cancel", self.t("settings.sync.cancel"), false).on_click(cx.listener(
+                        |this, _, _, cx| {
+                            if let Some(app) = this.weak_app.upgrade() {
+                                let _ = app.update(cx, |app, _| app.state.sync.disconnect());
+                            }
+                            cx.notify();
+                        },
+                    )),
+                );
+            }
+            SyncStatus::Deletions { .. } => {
+                actions = actions
+                    .child(
+                        self.sync_button("sync-allow-deletions", self.t("settings.sync.allow_deletions"), false)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(app) = this.weak_app.upgrade() {
+                                    app.update(cx, |app, _| app.state.sync.allow_deletions());
+                                }
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        self.sync_button("sync-disconnect", self.t("settings.sync.disconnect"), false)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(app) = this.weak_app.upgrade() {
+                                    let _ = app.update(cx, |app, _| app.state.sync.disconnect());
+                                }
+                                cx.notify();
+                            })),
+                    );
+            }
+            _ => {
+                actions = actions.child(
+                    self.sync_button("sync-disconnect", self.t("settings.sync.disconnect"), false).on_click(
+                        cx.listener(|this, _, _, cx| {
+                            if let Some(app) = this.weak_app.upgrade() {
+                                let _ = app.update(cx, |app, _| app.state.sync.disconnect());
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                );
+            }
+        }
+
+        let indicator = match &status {
+            SyncStatus::Running(_) => Some((icons::ICON_REFRESH, theme.accent, true)),
+            SyncStatus::Ready if last.is_some() => Some((icons::ICON_CHECK, theme.success, false)),
+            SyncStatus::Unsynced { .. } | SyncStatus::Failed(_) => {
+                Some((icons::ICON_TRIANGLE_ALERT, theme.text_muted, false))
+            }
+            _ => None,
+        };
+        if let Some((icon, color, spinning)) = indicator {
+            let icon = icons::icon(icon, 16.0, color);
+            let icon = if spinning {
+                icon.with_animation(
+                    SharedString::from("sync-spinner"),
+                    gpui::Animation::new(Duration::from_millis(900)).repeat(),
+                    |icon, delta| {
+                        icon.with_transformation(gpui::Transformation::rotate(gpui::radians(
+                            delta * std::f32::consts::TAU,
+                        )))
+                    },
+                )
+                .into_any_element()
+            } else {
+                icon.into_any_element()
+            };
+            actions = actions.child(
+                div()
+                    .w(px(20.0))
+                    .h(px(20.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(icon),
+            );
+        }
+
+        blocks.push(self.sync_card(
+            &self.t("settings.sync.providers"),
+            vec![self.sync_row("Dropbox", Some(&status_text), actions)],
+        ));
+
+        if workspace.is_none() {
+            blocks.push(self.sync_card(
+                &self.t("settings.sync.settings"),
+                vec![self.sync_row(&self.t("settings.sync.no_workspace"), None, div())],
+            ));
+            return div().flex().flex_col().gap_5().children(blocks);
+        }
+
+        let root = workspace.unwrap();
+        // The service keeps the last measured list; a large file moved to the
+        // trash is gone from disk immediately, so the row must disappear
+        // before the next sync pass refreshes the memory snapshot.
+        let large: Vec<Large> = large
+            .into_iter()
+            .filter(|large| root.join(&large.path).exists())
+            .collect();
+        let connected = !matches!(status, SyncStatus::Off(_) | SyncStatus::Login);
+        let history_available = root.join(".vault").join("history").is_dir();
+        if connected {
+            let cloud_folder = settings
+                .remote_folder
+                .clone()
+                .or_else(|| crate::sync::identity::read_folder(&root).ok().flatten())
+                .or_else(|| crate::sync::identity::folder_name(&root, None).ok())
+                .unwrap_or_default();
+            let mut rows = Vec::new();
+            if !cloud_folder.is_empty() {
+                rows.push(self.sync_row(&self.t("settings.sync.folder"), Some(&cloud_folder), div()));
+            }
+            if settings.enabled && size.synced > 0 {
+                let files = self.sync_file_count(size.files);
+                let bytes = self.sync_bytes(size.synced);
+                let text = self.t_fmt("settings.sync.size_value", &[&files, &bytes]);
+                rows.push(self.sync_row(&self.t("settings.sync.size"), Some(&text), div()));
+            }
+
+            let interval_label = self.sync_interval_label(&settings);
+            let interval_control = div()
+                .relative()
+                .child(
+                    div()
+                        .id("sync-interval-btn")
+                        .cursor_pointer()
+                        .child(self.render_select_pill(&interval_label))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            if this.sync_interval_popup_is_open() {
+                                this.close_sync_interval_popup(cx);
+                            } else {
+                                this.open_sync_interval_popup(window, cx);
+                            }
+                        })),
+                )
+                .when_some(self.sync_interval_popup.clone(), |parent, popup| {
+                    parent.child(
+                        gpui::deferred(
+                            div()
+                                .id("sync-interval-menu")
+                                .absolute()
+                                .top_full()
+                                .right_0()
+                                .mt_1()
+                                .child(popup),
+                        )
+                        .with_priority(999),
+                    )
+                });
+            let interval_actions = div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap_2()
+                .child(interval_control)
+                .child(
+                    self.sync_button("sync-now", self.t("settings.sync.sync_now"), false)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            if let Some(app) = this.weak_app.upgrade() {
+                                let _ = app.update(cx, |app, _| {
+                                    app.state.sync.request(std::time::Duration::ZERO)
+                                });
+                            }
+                            cx.notify();
+                        })),
+                );
+            let detail = match &status {
+                SyncStatus::Running(progress) => Some(self.sync_progress_text(progress)),
+                _ if settings.enabled => due.map(|due| self.sync_countdown(due)),
+                _ => None,
+            };
+            rows.push(self.sync_row(
+                &self.t("settings.sync.enabled"),
+                detail.as_deref(),
+                interval_actions,
+            ));
+            if self.sync_custom_open {
+                rows.push(self.sync_row(
+                    &self.t("settings.sync.custom_interval"),
+                    Some(&self.t("settings.sync.custom_interval_desc")),
+                    self.render_sync_custom_editor(window, cx),
+                ));
+            }
+
+            if settings.enabled {
+                let root_for_trash = root.clone();
+                let trash = settings.trash;
+                rows.push(self.sync_row(
+                    &self.t("settings.sync.trash"),
+                    None,
+                    div()
+                        .id("sync-trash")
+                        .child(self.render_toggle_switch(trash))
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if let Some(app) = this.weak_app.upgrade() {
+                                let root = root_for_trash.clone();
+                                app.update(cx, |app, _| {
+                                    let mut next = app.state.sync_settings_for(&root);
+                                    next.trash = !next.trash;
+                                    app.state.set_sync_settings(&root, next);
+                                });
+                            }
+                            this.refresh_sync_config(cx);
+                            cx.notify();
+                        })),
+                ));
+
+                if history_available {
+                    let root_for_history = root.clone();
+                    let history = settings.history;
+                    rows.push(self.sync_row(
+                        &self.t("settings.sync.history"),
+                        None,
+                        div()
+                            .id("sync-history")
+                            .child(self.render_toggle_switch(history))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if let Some(app) = this.weak_app.upgrade() {
+                                    let root = root_for_history.clone();
+                                    app.update(cx, |app, _| {
+                                        let mut next = app.state.sync_settings_for(&root);
+                                        next.history = !next.history;
+                                        app.state.set_sync_settings(&root, next);
+                                    });
+                                }
+                                this.refresh_sync_config(cx);
+                                cx.notify();
+                            })),
+                    ));
+                }
+            }
+
+            blocks.push(self.sync_card(&self.t("settings.sync.settings"), rows));
+        }
+
+        let active: Vec<&Large> = large.iter().filter(|large| !large.ignored).collect();
+        let ignored: Vec<&Large> = large.iter().filter(|large| large.ignored).collect();
+        if !active.is_empty() {
+            let kept: Vec<&Large> = active.iter().copied().filter(|large| large.kept).collect();
+            let mut rows = Vec::new();
+            if kept.len() > 1 {
+                let total: u64 = kept.iter().map(|large| large.size).sum();
+                let bytes = self.sync_bytes(total);
+                let hint = self.t_fmt("settings.sync.send_all_hint", &[&bytes]);
+                let paths: Vec<String> = kept.iter().map(|large| large.path.clone()).collect();
+                rows.push(self.sync_row(
+                    &self.t("settings.sync.send_all"),
+                    Some(&hint),
+                    self.sync_button("sync-send-all", self.t("settings.sync.send_all_button"), false).on_click(
+                        cx.listener(move |this, _, _, cx| {
+                            if let Some(app) = this.weak_app.upgrade() {
+                                let paths = paths.clone();
+                                app.update(cx, |app, _| app.state.sync.allow(paths));
+                            }
+                            cx.notify();
+                        }),
+                    ),
+                ));
+            }
+            for large in &active {
+                rows.push(self.sync_large_row(large, &root, cx));
+            }
+            blocks.push(self.sync_card(&self.t("settings.sync.files"), rows));
+        }
+        if !ignored.is_empty() {
+            let count = self.sync_file_count(ignored.len() as u64);
+            let toggle = if self.show_ignored {
+                self.t("settings.sync.hide")
+            } else {
+                self.t("settings.sync.show")
+            };
+            let mut rows = vec![self.sync_row(
+                &self.t("settings.sync.paused_files"),
+                Some(&count),
+                self.sync_button("sync-toggle-ignored", toggle, false).on_click(cx.listener(
+                    |this, _, _, cx| {
+                        this.show_ignored = !this.show_ignored;
+                        cx.notify();
+                    },
+                )),
+            )];
+            if self.show_ignored {
+                for large in &ignored {
+                    rows.push(self.sync_large_row(large, &root, cx));
+                }
+            }
+            blocks.push(self.sync_card(&self.t("settings.sync.ignored_title"), rows));
+        }
+
+        div().flex().flex_col().gap_5().children(blocks)
+    }
+
 }
+
+fn format_sync_time(millis: u64) -> String {
+    let offset = time::UtcOffset::current_local_offset().unwrap_or(time::UtcOffset::UTC);
+    format_sync_time_with_offset(millis, offset)
+}
+
+fn format_sync_time_with_offset(millis: u64, offset: time::UtcOffset) -> String {
+    let at = time::OffsetDateTime::from_unix_timestamp((millis / 1000) as i64)
+        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH)
+        .to_offset(offset);
+    format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}",
+        at.year(),
+        u8::from(at.month()),
+        at.day(),
+        at.hour(),
+        at.minute()
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_sync_time_with_offset;
+
+    #[test]
+    fn sync_time_is_rendered_in_the_given_zone() {
+        let utc_plus_three = time::UtcOffset::from_hms(3, 0, 0).unwrap();
+        assert_eq!(
+            format_sync_time_with_offset(1_767_225_601_000, utc_plus_three),
+            "2026-01-01 03:00"
+        );
+    }
+}
+

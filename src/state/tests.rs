@@ -958,6 +958,7 @@
             workspace_path: Some(temp_dir.clone()),
             workspace_name: "test".into(),
             vault: Some(vault),
+            vault_from_cli: false,
             events,
             commands,
             ribbon: Arc::new(crate::ribbon::RibbonRegistry::new()),
@@ -995,6 +996,7 @@
                 None,
                 settings.clone(),
             ),
+            sync: crate::sync::SyncService::new(&temp_dir),
             pending_file_deletions: HashMap::new(),
         };
 

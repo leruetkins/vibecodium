@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -500,6 +501,37 @@ impl Default for CommunityPluginSettings {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SyncSettings {
+    /// Enables Dropbox sync for this workspace.
+    pub enabled: bool,
+    /// Include the vault trash (`.trash`) in sync.
+    #[serde(default = "default_true")]
+    pub trash: bool,
+    /// Include `.vault/history` in sync when the vault has one.
+    #[serde(default = "default_true")]
+    pub history: bool,
+    /// Automatic pass interval in seconds. `0` means "only manual/event-driven".
+    pub interval: u64,
+    /// Optional Dropbox app-folder name for this workspace. `None` uses the
+    /// workspace directory name.
+    #[serde(default)]
+    pub remote_folder: Option<String>,
+}
+
+impl Default for SyncSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            trash: true,
+            history: true,
+            interval: 300,
+            remote_folder: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppConfig {
@@ -513,6 +545,13 @@ pub struct AppConfig {
     pub files: FilesSettings,
     pub images: ImagesSettings,
     pub community_plugins: CommunityPluginSettings,
+    /// Default Dropbox sync settings for workspaces without an entry in
+    /// `sync_vaults`.
+    pub sync: SyncSettings,
+    /// Per-workspace Dropbox sync settings keyed by the normalized workspace
+    /// path.
+    #[serde(default)]
+    pub sync_vaults: HashMap<String, SyncSettings>,
 }
 
 // =========================================================================

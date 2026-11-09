@@ -27,6 +27,7 @@ pub const LAYERS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0
 pub const BOOKMARK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>"#;
 pub const BOOKMARK_FILLED: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="black" stroke="none"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>"#;
 pub const SETTINGS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>"#;
+pub const SLIDERS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg>"#;
 pub const MONITOR: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>"#;
 pub const SUN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>"#;
 pub const MOON: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>"#;
@@ -66,6 +67,7 @@ pub const CANVAS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0
 pub const DRAWING: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>"#;
 pub const HASH: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/></svg>"#;
 pub const DOWNLOAD: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>"#;
+pub const UPLOAD: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 8 12 3 17 8"/><line x1="12" x2="12" y1="3" y2="15"/></svg>"#;
 pub const MOVE_ARROWS: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" x2="22" y1="12" y2="12"/><line x1="12" x2="12" y1="2" y2="22"/></svg>"#;
 pub const SPLIT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/></svg>"#;
 pub const APP_WINDOW: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 4v4"/><path d="M2 8h20"/><path d="M6 4v4"/></svg>"#;
@@ -145,6 +147,7 @@ pub const ICON_CANVAS: &str = "icons/canvas.svg";
 pub const ICON_DRAWING: &str = "icons/drawing.svg";
 pub const ICON_HASH: &str = "icons/hash.svg";
 pub const ICON_DOWNLOAD: &str = "icons/download.svg";
+pub const ICON_UPLOAD: &str = "icons/upload.svg";
 pub const ICON_MOVE_ARROWS: &str = "icons/move_arrows.svg";
 pub const ICON_SPLIT: &str = "icons/split.svg";
 pub const ICON_APP_WINDOW: &str = "icons/app_window.svg";
@@ -217,6 +220,7 @@ pub const ICON_LAYERS: &str = "icons/layers.svg";
 pub const ICON_BOOKMARK: &str = "icons/bookmark.svg";
 pub const ICON_BOOKMARK_FILLED: &str = "icons/bookmark_filled.svg";
 pub const ICON_SETTINGS: &str = "icons/settings.svg";
+pub const ICON_SLIDERS: &str = "icons/sliders.svg";
 pub const ICON_SUN: &str = "icons/sun.svg";
 pub const ICON_MOON: &str = "icons/moon.svg";
 pub const ICON_MONITOR: &str = "icons/monitor.svg";
@@ -273,6 +277,7 @@ impl gpui::AssetSource for MemoryAssetSource {
             ICON_BOOKMARK => Some(BOOKMARK),
             ICON_BOOKMARK_FILLED => Some(BOOKMARK_FILLED),
             ICON_SETTINGS => Some(SETTINGS),
+            ICON_SLIDERS => Some(SLIDERS),
             ICON_SUN => Some(SUN),
             ICON_MOON => Some(MOON),
             ICON_MONITOR => Some(MONITOR),
@@ -319,6 +324,7 @@ impl gpui::AssetSource for MemoryAssetSource {
             ICON_DRAWING => Some(DRAWING),
             ICON_HASH => Some(HASH),
             ICON_DOWNLOAD => Some(DOWNLOAD),
+            ICON_UPLOAD => Some(UPLOAD),
             ICON_MOVE_ARROWS => Some(MOVE_ARROWS),
             ICON_SPLIT => Some(SPLIT),
             ICON_APP_WINDOW => Some(APP_WINDOW),
@@ -404,6 +410,7 @@ impl gpui::AssetSource for MemoryAssetSource {
             ICON_BOOKMARK.into(),
             ICON_BOOKMARK_FILLED.into(),
             ICON_SETTINGS.into(),
+            ICON_SLIDERS.into(),
             ICON_SUN.into(),
             ICON_MOON.into(),
             ICON_MONITOR.into(),
@@ -449,6 +456,7 @@ impl gpui::AssetSource for MemoryAssetSource {
             ICON_DRAWING.into(),
             ICON_HASH.into(),
             ICON_DOWNLOAD.into(),
+            ICON_UPLOAD.into(),
             ICON_MOVE_ARROWS.into(),
             ICON_SPLIT.into(),
             ICON_APP_WINDOW.into(),
@@ -516,11 +524,13 @@ pub fn map_obsidian_icon(name: &str) -> &'static str {
         "history" | "clock" => ICON_HISTORY,
         "trash" | "trash-2" => ICON_TRASH_2,
         "settings" | "gear" => ICON_SETTINGS,
+        "sliders" | "sliders-horizontal" | "equalizer" | "settings-2" => ICON_SLIDERS,
         "sun" | "light-mode" | "sun-medium" => ICON_SUN,
         "moon" | "dark-mode" | "moon-star" => ICON_MOON,
         "bookmark" => ICON_BOOKMARK,
         "bolt" | "zap" | "sparkles" => ICON_BOLT,
         "refresh" | "reload" => ICON_REFRESH,
+        "upload" => ICON_UPLOAD,
         "eye" | "preview" => ICON_EYE,
         "paperclip" | "attachment" => ICON_PAPERCLIP,
         "image" | "photo" | "picture" | "gallery" => ICON_CANVAS,
