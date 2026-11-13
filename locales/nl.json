@@ -172,7 +172,12 @@
     "templates": {
       "title": "Opmerking sjablonen",
       "folder": "Sjablonenmap",
-      "folder_desc": "Relatief pad naar Markdown-sjablonen in de kluis"
+      "folder_desc": "Relatief pad naar Markdown-sjablonen in de kluis",
+      "daily_title": "Dagelijkse notitie",
+      "daily_format": "Bestandsnaamformaat",
+      "daily_format_desc": "Plaatsaanduidingen: {{YYYY}} jaar, {{YY}} kort jaar, {{MM}}/{{M}} maand, {{DD}}/{{D}} dag, {{HH}}/{{H}} uur, {{mm}}/{{m}} minuut, {{ss}}/{{s}} seconde. Overige tekst wordt ongewijzigd gebruikt.",
+      "daily_folder": "Map voor dagelijkse notities",
+      "daily_folder_desc": "Relatief aan de kluisroot; leeg gebruikt de root"
     },
     "files": {
       "title": "Bestanden en media",
@@ -943,6 +948,22 @@
       "table_delete_row": "Rij verwijderen",
       "table_delete_column": "Kolom verwijderen",
       "table_delete_table": "Tabel verwijderen"
+    },
+    "toolbar": {
+      "undo": "Ongedaan maken",
+      "redo": "Opnieuw",
+      "clear_formatting": "Opmaak wissen",
+      "underline": "Onderstreept",
+      "attach_file": "Bestand bijvoegen",
+      "toggle_task": "Taak",
+      "indent": "Inspringing vergroten",
+      "outdent": "Inspringing verkleinen",
+      "fullscreen": "Volledig scherm",
+      "more_headings": "Meer kopteksten",
+      "lists": "Lijsten",
+      "alignment": "Uitlijning",
+      "more_actions": "Meer acties",
+      "submenu": "Submenu"
     }
   },
   "search": {
@@ -1030,5 +1051,16 @@
       "trash": "Afval",
       "hide_panel": "Verticaal paneel verbergen"
     }
+  },
+  "command": {
+    "close_tab": "Tabblad sluiten",
+    "toggle_right_sidebar": "Rechterzijbalk wisselen",
+    "toggle_ribbon": "Lint wisselen",
+    "quick_switcher": "Snelwisselaar",
+    "split_right": "Rechts splitsen",
+    "split_down": "Onder splitsen",
+    "export_pdf": "Exporteren naar PDF",
+    "unused_attachments": "Ongebruikte bijlagen zoeken",
+    "export_markdown_zip": "Notitie exporteren naar Markdown (zip)"
   }
 }

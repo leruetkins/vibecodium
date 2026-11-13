@@ -8,10 +8,11 @@
 //! - Up/Down arrow wrap navigation, Enter to run, Escape to dismiss.
 
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use gpui::{
-    div, prelude::*, px, Context, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
+    div, point, prelude::*, px, Context, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
     MouseMoveEvent, SharedString, Styled, Window,
 };
 
@@ -23,7 +24,32 @@ use crate::views::app_view::AppView;
 use crate::views::goto_search::{
     highlight_query_terms, highlight_terms, word_range_at,
 };
-use crate::views::scrollbar::ScrollbarDrag;
+use crate::views::scrollbar::{
+    overlay_scrollbar, ScrollbarDrag, ScrollbarGeometry, ScrollbarStyle,
+};
+
+/// Right gutter of the command list, matching the `p_2` padding of the scroll
+/// container: the scrollbar lane lives in that gutter instead of floating over
+/// the rows.
+const PALETTE_RESULTS_PAD: f32 = 8.0;
+
+/// Gap the rows leave between their background and the scrollbar lane, so a
+/// highlighted row does not run straight into the thumb.
+const PALETTE_ROW_SCROLLBAR_GAP: f32 = 4.0;
+
+/// Scrollbar look for the command list. Lane, thumb width and inset mirror the
+/// sidebar file tree; the track sits flush with the viewport because the list
+/// padding already provides the gutter.
+fn palette_scrollbar_style() -> ScrollbarStyle {
+    ScrollbarStyle {
+        track_w: PALETTE_RESULTS_PAD,
+        thumb_w: 6.0,
+        thumb_w_active: 6.0,
+        thumb_inset: 2.0,
+        track_right_offset: 0.0,
+        ..ScrollbarStyle::default()
+    }
+}
 
 /// State of the Command Palette modal dialog.
 #[derive(Clone, Debug, Default)]
@@ -34,6 +60,8 @@ pub struct CommandPaletteState {
     pub selection_anchor: Option<usize>,
     pub is_mouse_selecting: bool,
     pub filtered_commands: Vec<Command>,
+    /// Stable numbers shown in the left column of each row.
+    pub command_numbers: HashMap<String, usize>,
     pub selected_ix: usize,
     /// Overlay scrollbar drag state for the command list.
     pub scrollbar_drag: ScrollbarDrag,
@@ -73,10 +101,12 @@ impl AppView {
             self.close_plugin_catalog(window, cx);
         }
 
-        let all_commands = self.state.commands.all();
+        let all_commands = self.state.commands.search("", &self.config.ui.language);
+        let command_numbers = self.state.commands.numbers();
         self.command_palette = CommandPaletteState {
             is_open: true,
             filtered_commands: all_commands,
+            command_numbers,
             selected_ix: 0,
             box_origin_x: self.command_palette.box_origin_x.clone(),
             ..Default::default()
@@ -100,9 +130,14 @@ impl AppView {
         cx.notify();
     }
 
-    /// Re-filters commands according to the current query.
+    /// Re-filters commands according to the current query,
+    /// matching both the interface language and English.
     pub fn run_command_palette_filter(&mut self) {
-        let hits = self.state.commands.search(&self.command_palette.query);
+        let hits = self
+            .state
+            .commands
+            .search(&self.command_palette.query, &self.config.ui.language);
+        self.command_palette.command_numbers = self.state.commands.numbers();
         self.command_palette.filtered_commands = hits;
         self.command_palette.selected_ix = self
             .command_palette
@@ -624,6 +659,29 @@ impl AppView {
         }
     }
 
+    /// Follows the pointer while the palette scrollbar thumb is dragged.
+    pub fn handle_command_palette_scrollbar_drag(
+        &mut self,
+        pointer_y: f32,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.command_palette.scrollbar_drag.active {
+            return;
+        }
+        let style = palette_scrollbar_style();
+        let Some(geometry) =
+            ScrollbarGeometry::from_handle(&self.command_palette_scroll_handle, &style)
+        else {
+            return;
+        };
+        geometry.apply_drag(
+            &self.command_palette_scroll_handle,
+            &self.command_palette.scrollbar_drag,
+            pointer_y,
+        );
+        cx.notify();
+    }
+
     /// Renders the Obsidian-style Command Palette modal overlay.
     pub fn render_command_palette(
         &self,
@@ -636,6 +694,7 @@ impl AppView {
         let window_h: f32 = window_size.height.into();
         let card_w = (620.0f32).min(window_w - 48.0).max(320.0);
         let card_h = (520.0f32).min(window_h - 100.0).max(340.0);
+        let scroll_style = palette_scrollbar_style();
 
         let query = self.command_palette.query.clone();
         let terms = highlight_query_terms(&query);
@@ -707,8 +766,7 @@ impl AppView {
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 if this.command_palette.scrollbar_drag.active {
                     let y: f32 = event.position.y.into();
-                    // Follow scrollbar drag
-                    let _ = y;
+                    this.handle_command_palette_scrollbar_drag(y, cx);
                 } else {
                     this.handle_command_palette_mouse_move(event, window, cx);
                 }
@@ -923,7 +981,20 @@ impl AppView {
                                             .children(self.command_palette.filtered_commands.iter().enumerate().map(|(ix, cmd)| {
                                                 let is_selected = ix == selected_ix;
                                                 let cmd_id_click = cmd.id.clone();
-                                                let cmd_name = cmd.name.clone();
+                                                let (cmd_label, cmd_original) = crate::command_i18n::display_labels(
+                                                    &cmd.id,
+                                                    &cmd.name,
+                                                    &self.config.ui.language,
+                                                );
+                                                let cmd_meta = crate::command_i18n::secondary_line(
+                                                    cmd_original.as_deref(),
+                                                    &cmd.id,
+                                                );
+                                                let cmd_number = self
+                                                    .command_palette
+                                                    .command_numbers
+                                                    .get(&cmd.id)
+                                                    .copied();
                                                 let hotkey_opt = cmd.hotkey.clone();
 
                                                 div()
@@ -934,6 +1005,7 @@ impl AppView {
                                                     .justify_between()
                                                     .px_3()
                                                     .py_1p5()
+                                                    .mr(px(PALETTE_ROW_SCROLLBAR_GAP))
                                                     .rounded_md()
                                                     .cursor_pointer()
                                                     .when(is_selected, |d| d.bg(theme.bg_hover))
@@ -952,14 +1024,51 @@ impl AppView {
                                                         this.close_command_palette(window, cx);
                                                         this.execute_command(&cmd_id_click, window, cx);
                                                     }))
-                                                    // Command name on left with term highlighting
+                                                    // Localized name on top; English name and id below
                                                     .child(
                                                         div()
                                                             .flex_1()
                                                             .min_w_0()
-                                                            .truncate()
-                                                            .text_sm()
-                                                            .child(highlight_terms(&cmd_name, &terms, theme.text_primary, is_selected, theme)),
+                                                            .flex()
+                                                            .flex_col()
+                                                            .child(
+                                                                div()
+                                                                    .flex()
+                                                                    .flex_row()
+                                                                    .items_center()
+                                                                    .min_w_0()
+                                                                    .child(
+                                                                        div()
+                                                                            .w(px(26.0))
+                                                                            .flex_shrink_0()
+                                                                            .mr_1p5()
+                                                                            .flex()
+                                                                            .justify_end()
+                                                                            .text_sm()
+                                                                            .text_color(theme.text_primary)
+                                                                            .child(
+                                                                                cmd_number
+                                                                                    .map(|number| number.to_string())
+                                                                                    .unwrap_or_default(),
+                                                                            ),
+                                                                    )
+                                                                    .child(
+                                                                        div()
+                                                                            .flex_1()
+                                                                            .min_w_0()
+                                                                            .truncate()
+                                                                            .text_sm()
+                                                                            .child(highlight_terms(&cmd_label, &terms, theme.text_primary, is_selected, theme)),
+                                                                    ),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .truncate()
+                                                                    .pl(px(32.0))
+                                                                    .text_xs()
+                                                                    .text_color(theme.text_muted)
+                                                                    .child(highlight_terms(&cmd_meta, &terms, theme.text_muted, is_selected, theme)),
+                                                            ),
                                                     )
                                                     // Hotkey badge / pill on right if present
                                                     .when_some(hotkey_opt, |row, hotkey| {
@@ -980,6 +1089,38 @@ impl AppView {
                                                     })
                                             })),
                                     ),
+                            )
+                            // Shared overlay scrollbar, same look as the sidebar tree.
+                            .when_some(
+                                ScrollbarGeometry::from_handle(
+                                    &self.command_palette_scroll_handle,
+                                    &scroll_style,
+                                ),
+                                |viewport, geometry| {
+                                    viewport.child(overlay_scrollbar(
+                                        "command-palette-scrollbar-track",
+                                        &geometry,
+                                        &scroll_style,
+                                        theme,
+                                        self.command_palette.scrollbar_drag.active,
+                                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                                            cx.stop_propagation();
+                                            let pointer_y: f32 = event.position.y.into();
+                                            let scroll_y =
+                                                geometry.offset_for_track_click(pointer_y);
+                                            this.command_palette_scroll_handle
+                                                .set_offset(point(px(0.0), px(-scroll_y)));
+                                            cx.notify();
+                                        }),
+                                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                                            cx.stop_propagation();
+                                            this.command_palette
+                                                .scrollbar_drag
+                                                .begin(event.position.y.into(), geometry.scroll_y);
+                                            cx.notify();
+                                        }),
+                                    ))
+                                },
                             )
                             // ---- Footer: Obsidian-style hints ----
                             .child(

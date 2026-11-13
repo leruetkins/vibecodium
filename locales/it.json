@@ -172,7 +172,12 @@
     "templates": {
       "title": "Modelli di nota",
       "folder": "Cartella dei modelli",
-      "folder_desc": "Percorso relativo ai modelli Markdown nel vault"
+      "folder_desc": "Percorso relativo ai modelli Markdown nel vault",
+      "daily_title": "Nota quotidiana",
+      "daily_format": "Formato del nome file",
+      "daily_format_desc": "Segnaposto: {{YYYY}} anno, {{YY}} anno breve, {{MM}}/{{M}} mese, {{DD}}/{{D}} giorno, {{HH}}/{{H}} ora, {{mm}}/{{m}} minuto, {{ss}}/{{s}} secondo. Il resto del testo viene usato così com'è.",
+      "daily_folder": "Cartella delle note quotidiane",
+      "daily_folder_desc": "Relativa alla radice dell'archivio; vuota usa la radice"
     },
     "files": {
       "title": "File e contenuti multimediali",
@@ -943,6 +948,22 @@
       "table_delete_row": "Elimina riga",
       "table_delete_column": "Elimina colonna",
       "table_delete_table": "Elimina tabella"
+    },
+    "toolbar": {
+      "undo": "Annulla",
+      "redo": "Ripeti",
+      "clear_formatting": "Cancella formattazione",
+      "underline": "Sottolineato",
+      "attach_file": "Allega file",
+      "toggle_task": "Attività",
+      "indent": "Aumenta rientro",
+      "outdent": "Riduci rientro",
+      "fullscreen": "Schermo intero",
+      "more_headings": "Altri titoli",
+      "lists": "Elenchi",
+      "alignment": "Allineamento",
+      "more_actions": "Altre azioni",
+      "submenu": "Sottomenu"
     }
   },
   "search": {
@@ -1030,5 +1051,16 @@
       "trash": "Spazzatura",
       "hide_panel": "Nascondi il pannello verticale"
     }
+  },
+  "command": {
+    "close_tab": "Chiudi scheda",
+    "toggle_right_sidebar": "Mostra/nascondi barra laterale destra",
+    "toggle_ribbon": "Mostra/nascondi barra multifunzione",
+    "quick_switcher": "Selettore rapido",
+    "split_right": "Dividi a destra",
+    "split_down": "Dividi in basso",
+    "export_pdf": "Esporta in PDF",
+    "unused_attachments": "Trova allegati non utilizzati",
+    "export_markdown_zip": "Esporta nota in Markdown (zip)"
   }
 }

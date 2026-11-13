@@ -172,7 +172,12 @@
     "templates": {
       "title": "笔记模板",
       "folder": "模板文件夹",
-      "folder_desc": "Vault 中 Markdown 模板的相对路径"
+      "folder_desc": "Vault 中 Markdown 模板的相对路径",
+      "daily_title": "每日笔记",
+      "daily_format": "文件名格式",
+      "daily_format_desc": "占位符：{{YYYY}} 年、{{YY}} 短年份、{{MM}}/{{M}} 月、{{DD}}/{{D}} 日、{{HH}}/{{H}} 时、{{mm}}/{{m}} 分、{{ss}}/{{s}} 秒。其他文本按原样使用。",
+      "daily_folder": "每日笔记文件夹",
+      "daily_folder_desc": "相对于仓库根目录；留空则使用根目录"
     },
     "files": {
       "title": "文件和媒体",
@@ -943,6 +948,22 @@
       "table_delete_row": "删除行",
       "table_delete_column": "删除列",
       "table_delete_table": "删除表"
+    },
+    "toolbar": {
+      "undo": "撤消",
+      "redo": "重做",
+      "clear_formatting": "清除格式",
+      "underline": "下划线",
+      "attach_file": "附加文件",
+      "toggle_task": "任务",
+      "indent": "增加缩进",
+      "outdent": "减少缩进",
+      "fullscreen": "全屏",
+      "more_headings": "更多标题",
+      "lists": "列表",
+      "alignment": "对齐",
+      "more_actions": "更多操作",
+      "submenu": "子菜单"
     }
   },
   "search": {
@@ -1030,5 +1051,16 @@
       "trash": "回收站",
       "hide_panel": "隐藏垂直面板"
     }
+  },
+  "command": {
+    "close_tab": "关闭标签页",
+    "toggle_right_sidebar": "切换右侧边栏",
+    "toggle_ribbon": "切换功能区",
+    "quick_switcher": "快速切换",
+    "split_right": "向右拆分",
+    "split_down": "向下拆分",
+    "export_pdf": "导出为 PDF",
+    "unused_attachments": "查找未使用的附件",
+    "export_markdown_zip": "将笔记导出为 Markdown（zip）"
   }
 }

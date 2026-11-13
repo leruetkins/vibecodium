@@ -4,6 +4,7 @@
 
 pub mod blink_manager;
 pub mod code_scan;
+pub mod command_i18n;
 pub mod commands;
 pub mod commands_builtin;
 pub mod events;
@@ -35,6 +36,7 @@ pub mod formatting;
 pub mod table;
 pub mod theme;
 pub mod toolbar;
+pub mod toolbar_i18n;
 pub mod vault;
 pub mod views;
 pub mod window_ops;

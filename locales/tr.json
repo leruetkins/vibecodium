@@ -172,7 +172,12 @@
     "templates": {
       "title": "Not Şablonları",
       "folder": "Şablonlar Klasörü",
-      "folder_desc": "Kasadaki Markdown şablonlarının göreceli yolu"
+      "folder_desc": "Kasadaki Markdown şablonlarının göreceli yolu",
+      "daily_title": "Günlük not",
+      "daily_format": "Dosya adı biçimi",
+      "daily_format_desc": "Yer tutucular: {{YYYY}} yıl, {{YY}} kısa yıl, {{MM}}/{{M}} ay, {{DD}}/{{D}} gün, {{HH}}/{{H}} saat, {{mm}}/{{m}} dakika, {{ss}}/{{s}} saniye. Diğer metin olduğu gibi kullanılır.",
+      "daily_folder": "Günlük notlar klasörü",
+      "daily_folder_desc": "Kasa köküne göre; boşsa kök kullanılır"
     },
     "files": {
       "title": "Dosyalar ve Medya",
@@ -943,6 +948,22 @@
       "table_delete_row": "Satırı sil",
       "table_delete_column": "Sütunu sil",
       "table_delete_table": "Tabloyu sil"
+    },
+    "toolbar": {
+      "undo": "Geri al",
+      "redo": "Yinele",
+      "clear_formatting": "Biçimlendirmeyi temizle",
+      "underline": "Altı çizili",
+      "attach_file": "Dosya ekle",
+      "toggle_task": "Görev",
+      "indent": "Girintiyi artır",
+      "outdent": "Girintiyi azalt",
+      "fullscreen": "Tam ekran",
+      "more_headings": "Diğer başlıklar",
+      "lists": "Listeler",
+      "alignment": "Hizalama",
+      "more_actions": "Diğer işlemler",
+      "submenu": "Alt menü"
     }
   },
   "search": {
@@ -1030,5 +1051,16 @@
       "trash": "Çöp",
       "hide_panel": "Dikey paneli gizle"
     }
+  },
+  "command": {
+    "close_tab": "Sekmeyi kapat",
+    "toggle_right_sidebar": "Sağ kenar çubuğunu aç/kapat",
+    "toggle_ribbon": "Şeridi aç/kapat",
+    "quick_switcher": "Hızlı geçiş",
+    "split_right": "Sağa böl",
+    "split_down": "Aşağı böl",
+    "export_pdf": "PDF olarak dışa aktar",
+    "unused_attachments": "Kullanılmayan ekleri bul",
+    "export_markdown_zip": "Notu Markdown (zip) olarak dışa aktar"
   }
 }

@@ -172,7 +172,12 @@
     "templates": {
       "title": "قوالب الملاحظات",
       "folder": "مجلد القوالب",
-      "folder_desc": "المسار النسبي لقوالب Markdown في القبو"
+      "folder_desc": "المسار النسبي لقوالب Markdown في القبو",
+      "daily_title": "ملاحظة يومية",
+      "daily_format": "تنسيق اسم الملف",
+      "daily_format_desc": "العناصر النائبة: {{YYYY}} السنة، {{YY}} السنة المختصرة، {{MM}}/{{M}} الشهر، {{DD}}/{{D}} اليوم، {{HH}}/{{H}} الساعة، {{mm}}/{{m}} الدقيقة، {{ss}}/{{s}} الثانية. يُستخدم النص الآخر كما هو.",
+      "daily_folder": "مجلد الملاحظات اليومية",
+      "daily_folder_desc": "نسبةً إلى جذر الخزنة؛ اتركه فارغًا لاستخدام الجذر"
     },
     "files": {
       "title": "الملفات والوسائط",
@@ -943,6 +948,22 @@
       "table_delete_row": "حذف الصف",
       "table_delete_column": "حذف العمود",
       "table_delete_table": "حذف الجدول"
+    },
+    "toolbar": {
+      "undo": "تراجع",
+      "redo": "إعادة",
+      "clear_formatting": "مسح التنسيق",
+      "underline": "تسطير",
+      "attach_file": "إرفاق ملف",
+      "toggle_task": "مهمة",
+      "indent": "زيادة المسافة البادئة",
+      "outdent": "تقليل المسافة البادئة",
+      "fullscreen": "ملء الشاشة",
+      "more_headings": "مزيد من العناوين",
+      "lists": "قوائم",
+      "alignment": "محاذاة",
+      "more_actions": "مزيد من الإجراءات",
+      "submenu": "قائمة فرعية"
     }
   },
   "search": {
@@ -1030,5 +1051,16 @@
       "trash": "نفاية",
       "hide_panel": "إخفاء اللوحة العمودية"
     }
+  },
+  "command": {
+    "close_tab": "إغلاق علامة التبويب",
+    "toggle_right_sidebar": "تبديل الشريط الجانبي الأيمن",
+    "toggle_ribbon": "تبديل الشريط",
+    "quick_switcher": "مبدّل سريع",
+    "split_right": "تقسيم إلى اليمين",
+    "split_down": "تقسيم للأسفل",
+    "export_pdf": "تصدير إلى PDF",
+    "unused_attachments": "بحث عن المرفقات غير المستخدمة",
+    "export_markdown_zip": "تصدير الملاحظة إلى Markdown (zip)"
   }
 }

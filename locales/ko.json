@@ -172,7 +172,12 @@
     "templates": {
       "title": "메모 템플릿",
       "folder": "템플릿 폴더",
-      "folder_desc": "Vault의 Markdown 템플릿에 대한 상대 경로"
+      "folder_desc": "Vault의 Markdown 템플릿에 대한 상대 경로",
+      "daily_title": "일일 노트",
+      "daily_format": "파일 이름 형식",
+      "daily_format_desc": "자리 표시자: {{YYYY}} 년, {{YY}} 짧은 연도, {{MM}}/{{M}} 월, {{DD}}/{{D}} 일, {{HH}}/{{H}} 시, {{mm}}/{{m}} 분, {{ss}}/{{s}} 초. 나머지 텍스트는 그대로 사용됩니다.",
+      "daily_folder": "일일 노트 폴더",
+      "daily_folder_desc": "보관소 루트 기준; 비어 있으면 루트 사용"
     },
     "files": {
       "title": "파일 및 미디어",
@@ -943,6 +948,22 @@
       "table_delete_row": "행 삭제",
       "table_delete_column": "열 삭제",
       "table_delete_table": "테이블 삭제"
+    },
+    "toolbar": {
+      "undo": "실행 취소",
+      "redo": "다시 실행",
+      "clear_formatting": "서식 지우기",
+      "underline": "밑줄",
+      "attach_file": "파일 첨부",
+      "toggle_task": "작업",
+      "indent": "들여쓰기 늘리기",
+      "outdent": "들여쓰기 줄이기",
+      "fullscreen": "전체 화면",
+      "more_headings": "기타 제목",
+      "lists": "목록",
+      "alignment": "정렬",
+      "more_actions": "추가 작업",
+      "submenu": "하위 메뉴"
     }
   },
   "search": {
@@ -1030,5 +1051,16 @@
       "trash": "쓰레기",
       "hide_panel": "수직 패널 숨기기"
     }
+  },
+  "command": {
+    "close_tab": "탭 닫기",
+    "toggle_right_sidebar": "오른쪽 사이드바 전환",
+    "toggle_ribbon": "리본 전환",
+    "quick_switcher": "빠른 전환",
+    "split_right": "오른쪽으로 분할",
+    "split_down": "아래로 분할",
+    "export_pdf": "PDF로 내보내기",
+    "unused_attachments": "사용하지 않는 첨부 파일 찾기",
+    "export_markdown_zip": "노트를 Markdown(zip)으로 내보내기"
   }
 }

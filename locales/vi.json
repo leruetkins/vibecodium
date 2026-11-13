@@ -172,7 +172,12 @@
     "templates": {
       "title": "Mẫu ghi chú",
       "folder": "Thư mục mẫu",
-      "folder_desc": "Đường dẫn tương đối đến các mẫu Markdown trong vault"
+      "folder_desc": "Đường dẫn tương đối đến các mẫu Markdown trong vault",
+      "daily_title": "Ghi chú hằng ngày",
+      "daily_format": "Định dạng tên tệp",
+      "daily_format_desc": "Biến: {{YYYY}} năm, {{YY}} năm rút gọn, {{MM}}/{{M}} tháng, {{DD}}/{{D}} ngày, {{HH}}/{{H}} giờ, {{mm}}/{{m}} phút, {{ss}}/{{s}} giây. Phần văn bản khác được dùng nguyên văn.",
+      "daily_folder": "Thư mục ghi chú hằng ngày",
+      "daily_folder_desc": "Tương đối với thư mục gốc của kho; để trống dùng thư mục gốc"
     },
     "files": {
       "title": "Tập tin & Phương tiện",
@@ -943,6 +948,22 @@
       "table_delete_row": "Xóa hàng",
       "table_delete_column": "Xóa cột",
       "table_delete_table": "Xóa bảng"
+    },
+    "toolbar": {
+      "undo": "Hoàn tác",
+      "redo": "Làm lại",
+      "clear_formatting": "Xóa định dạng",
+      "underline": "Gạch chân",
+      "attach_file": "Đính kèm tệp",
+      "toggle_task": "Nhiệm vụ",
+      "indent": "Tăng thụt lề",
+      "outdent": "Giảm thụt lề",
+      "fullscreen": "Toàn màn hình",
+      "more_headings": "Thêm tiêu đề",
+      "lists": "Danh sách",
+      "alignment": "Căn chỉnh",
+      "more_actions": "Thêm hành động",
+      "submenu": "Menu con"
     }
   },
   "search": {
@@ -1030,5 +1051,16 @@
       "trash": "Rác",
       "hide_panel": "Ẩn bảng dọc"
     }
+  },
+  "command": {
+    "close_tab": "Đóng thẻ",
+    "toggle_right_sidebar": "Bật/tắt thanh bên phải",
+    "toggle_ribbon": "Bật/tắt dải lệnh",
+    "quick_switcher": "Chuyển nhanh",
+    "split_right": "Chia sang phải",
+    "split_down": "Chia xuống dưới",
+    "export_pdf": "Xuất sang PDF",
+    "unused_attachments": "Tìm tệp đính kèm không dùng",
+    "export_markdown_zip": "Xuất ghi chú sang Markdown (zip)"
   }
 }

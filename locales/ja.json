@@ -172,7 +172,12 @@
     "templates": {
       "title": "メモテンプレート",
       "folder": "テンプレートフォルダー",
-      "folder_desc": "Vault 内の Markdown テンプレートへの相対パス"
+      "folder_desc": "Vault 内の Markdown テンプレートへの相対パス",
+      "daily_title": "デイリーノート",
+      "daily_format": "ファイル名の形式",
+      "daily_format_desc": "プレースホルダー: {{YYYY}} 年、{{YY}} 短い年、{{MM}}/{{M}} 月、{{DD}}/{{D}} 日、{{HH}}/{{H}} 時、{{mm}}/{{m}} 分、{{ss}}/{{s}} 秒。その他のテキストはそのまま使用されます。",
+      "daily_folder": "デイリーノートのフォルダー",
+      "daily_folder_desc": "保管庫のルートからの相対パス。空欄ならルートを使用"
     },
     "files": {
       "title": "ファイルとメディア",
@@ -943,6 +948,22 @@
       "table_delete_row": "行の削除",
       "table_delete_column": "列の削除",
       "table_delete_table": "テーブルの削除"
+    },
+    "toolbar": {
+      "undo": "元に戻す",
+      "redo": "やり直し",
+      "clear_formatting": "書式をクリア",
+      "underline": "下線",
+      "attach_file": "ファイルを添付",
+      "toggle_task": "タスク",
+      "indent": "インデントを増やす",
+      "outdent": "インデントを減らす",
+      "fullscreen": "全画面表示",
+      "more_headings": "その他の見出し",
+      "lists": "リスト",
+      "alignment": "配置",
+      "more_actions": "その他の操作",
+      "submenu": "サブメニュー"
     }
   },
   "search": {
@@ -1030,5 +1051,16 @@
       "trash": "ごみ",
       "hide_panel": "垂直パネルを非表示にする"
     }
+  },
+  "command": {
+    "close_tab": "タブを閉じる",
+    "toggle_right_sidebar": "右サイドバーを切り替え",
+    "toggle_ribbon": "リボンを切り替え",
+    "quick_switcher": "クイックスイッチャー",
+    "split_right": "右に分割",
+    "split_down": "下に分割",
+    "export_pdf": "PDF にエクスポート",
+    "unused_attachments": "未使用の添付ファイルを検索",
+    "export_markdown_zip": "ノートを Markdown（zip）にエクスポート"
   }
 }

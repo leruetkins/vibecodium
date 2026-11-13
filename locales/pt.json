@@ -172,7 +172,12 @@
     "templates": {
       "title": "Modelos de notas",
       "folder": "Pasta de modelos",
-      "folder_desc": "Caminho relativo para modelos Markdown no Vault"
+      "folder_desc": "Caminho relativo para modelos Markdown no Vault",
+      "daily_title": "Nota diária",
+      "daily_format": "Formato do nome do arquivo",
+      "daily_format_desc": "Marcadores: {{YYYY}} ano, {{YY}} ano curto, {{MM}}/{{M}} mês, {{DD}}/{{D}} dia, {{HH}}/{{H}} hora, {{mm}}/{{m}} minuto, {{ss}}/{{s}} segundo. O restante do texto é usado como está.",
+      "daily_folder": "Pasta das notas diárias",
+      "daily_folder_desc": "Relativa à raiz do cofre; vazia usa a raiz"
     },
     "files": {
       "title": "Arquivos e mídia",
@@ -943,6 +948,22 @@
       "table_delete_row": "Excluir linha",
       "table_delete_column": "Excluir coluna",
       "table_delete_table": "Excluir tabela"
+    },
+    "toolbar": {
+      "undo": "Desfazer",
+      "redo": "Refazer",
+      "clear_formatting": "Limpar formatação",
+      "underline": "Sublinhado",
+      "attach_file": "Anexar arquivo",
+      "toggle_task": "Tarefa",
+      "indent": "Aumentar recuo",
+      "outdent": "Diminuir recuo",
+      "fullscreen": "Tela cheia",
+      "more_headings": "Mais títulos",
+      "lists": "Listas",
+      "alignment": "Alinhamento",
+      "more_actions": "Mais ações",
+      "submenu": "Submenu"
     }
   },
   "search": {
@@ -1030,5 +1051,16 @@
       "trash": "Lixo",
       "hide_panel": "Ocultar painel vertical"
     }
+  },
+  "command": {
+    "close_tab": "Fechar aba",
+    "toggle_right_sidebar": "Mostrar/ocultar barra lateral direita",
+    "toggle_ribbon": "Mostrar/ocultar faixa de opções",
+    "quick_switcher": "Seletor rápido",
+    "split_right": "Dividir à direita",
+    "split_down": "Dividir abaixo",
+    "export_pdf": "Exportar para PDF",
+    "unused_attachments": "Encontrar anexos não utilizados",
+    "export_markdown_zip": "Exportar nota para Markdown (zip)"
   }
 }

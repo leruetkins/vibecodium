@@ -172,7 +172,12 @@
     "templates": {
       "title": "Anteckningsmallar",
       "folder": "Mallmapp",
-      "folder_desc": "Relativ väg till Markdown-mallar i valv"
+      "folder_desc": "Relativ väg till Markdown-mallar i valv",
+      "daily_title": "Daglig anteckning",
+      "daily_format": "Filnamnsformat",
+      "daily_format_desc": "Platshållare: {{YYYY}} år, {{YY}} kort år, {{MM}}/{{M}} månad, {{DD}}/{{D}} dag, {{HH}}/{{H}} timme, {{mm}}/{{m}} minut, {{ss}}/{{s}} sekund. Övrig text används som den är.",
+      "daily_folder": "Mapp för dagliga anteckningar",
+      "daily_folder_desc": "Relativt valvets rot; tom använder roten"
     },
     "files": {
       "title": "Filer och media",
@@ -943,6 +948,22 @@
       "table_delete_row": "Ta bort rad",
       "table_delete_column": "Ta bort kolumn",
       "table_delete_table": "Ta bort tabell"
+    },
+    "toolbar": {
+      "undo": "Ångra",
+      "redo": "Gör om",
+      "clear_formatting": "Rensa formatering",
+      "underline": "Understruken",
+      "attach_file": "Bifoga fil",
+      "toggle_task": "Uppgift",
+      "indent": "Öka indrag",
+      "outdent": "Minska indrag",
+      "fullscreen": "Helskärm",
+      "more_headings": "Fler rubriker",
+      "lists": "Listor",
+      "alignment": "Justering",
+      "more_actions": "Fler åtgärder",
+      "submenu": "Undermeny"
     }
   },
   "search": {
@@ -1030,5 +1051,16 @@
       "trash": "Skräp",
       "hide_panel": "Dölj vertikal panel"
     }
+  },
+  "command": {
+    "close_tab": "Stäng fliken",
+    "toggle_right_sidebar": "Växla höger sidofält",
+    "toggle_ribbon": "Växla menyband",
+    "quick_switcher": "Snabbväxlare",
+    "split_right": "Dela åt höger",
+    "split_down": "Dela nedåt",
+    "export_pdf": "Exportera till PDF",
+    "unused_attachments": "Hitta oanvända bilagor",
+    "export_markdown_zip": "Exportera anteckning till Markdown (zip)"
   }
 }
