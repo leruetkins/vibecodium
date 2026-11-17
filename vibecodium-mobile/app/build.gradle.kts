@@ -23,8 +23,8 @@ android {
         applicationId = "md.vibecodium.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
         }
@@ -43,7 +43,12 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
             signingConfig = signingConfigs.findByName("release")
         }
     }
@@ -55,6 +60,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {
@@ -75,6 +81,7 @@ dependencies {
     implementation("androidx.customview:customview:1.1.0")
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.documentfile:documentfile:1.0.0")
+    implementation("androidx.recyclerview:recyclerview:1.4.0")
     implementation(platform("androidx.compose:compose-bom:2025.05.01"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")

@@ -5,6 +5,108 @@ import org.json.JSONObject
 
 private const val DEFAULT_DAILY_NOTE_FORMAT = "{{YYYY}}-{{MM}}-{{DD}}"
 
+/** One heading palette entry, the same Okabe-Ito set the desktop app offers. */
+data class HeadingColorPreset(val id: String, val hex: String, val rgb: Int)
+
+object HeadingColors {
+    val presets = listOf(
+        HeadingColorPreset("orange", "#E69F00", 0xE69F00),
+        HeadingColorPreset("sky_blue", "#56B4E9", 0x56B4E9),
+        HeadingColorPreset("bluish_green", "#009E73", 0x009E73),
+        HeadingColorPreset("yellow", "#F0E442", 0xF0E442),
+        HeadingColorPreset("blue", "#0072B2", 0x0072B2),
+        HeadingColorPreset("vermilion", "#D55E00", 0xD55E00),
+        HeadingColorPreset("reddish_purple", "#CC79A7", 0xCC79A7),
+        HeadingColorPreset("red", "#F44336", 0xF44336),
+    )
+
+    private val fallback = presets.first { it.id == "blue" }
+
+    /** Resolves a preset id, a hex string or an alias to an opaque RGB value. */
+    fun rgb(name: String): Int = parseHex(name) ?: findPreset(name).rgb
+
+    /** Normalizes a preset id or a custom colour to `#RRGGBB`. */
+    fun hex(name: String): String =
+        parseHex(name)?.let { "#%06X".format(it) } ?: findPreset(name).hex
+
+    fun parseHex(value: String): Int? {
+        val clean = value.trim().removePrefix("#")
+        if (clean.length != 6 || clean.any { it.digitToIntOrNull(16) == null }) return null
+        return clean.toIntOrNull(16)
+    }
+
+    private fun findPreset(name: String): HeadingColorPreset {
+        presets.firstOrNull {
+            it.id.equals(name, ignoreCase = true) || it.hex.equals(name, ignoreCase = true)
+        }?.let { return it }
+        return when (name.lowercase()) {
+            "slate" -> presets.first { it.id == "sky_blue" }
+            "teal", "emerald" -> presets.first { it.id == "bluish_green" }
+            "indigo" -> fallback
+            "purple", "violet", "fuchsia" -> presets.first { it.id == "reddish_purple" }
+            "crimson", "rose" -> presets.first { it.id == "red" }
+            else -> fallback
+        }
+    }
+}
+
+/**
+ * One heading style, mirroring the desktop `HeadingStyle` block. [fontSize] is
+ * the size in dp at [AppSettingsJson.DEFAULT_EDITOR_FONT_DP]; the editor scales
+ * it with the configured body size, and [colorName] is a
+ * [HeadingColors] preset id or a custom `#RRGGBB` value.
+ */
+data class HeadingStyle(
+    val fontSize: Int,
+    val colorName: String = "blue",
+    val bold: Boolean = true,
+    val italic: Boolean = false,
+)
+
+/** Per-level heading styles; the defaults match the sizes the editor was tuned for. */
+data class HeadingsSettings(
+    val h1: HeadingStyle = HeadingStyle(19, "blue"),
+    val h2: HeadingStyle = HeadingStyle(18, "sky_blue"),
+    val h3: HeadingStyle = HeadingStyle(17, "bluish_green"),
+    val h4: HeadingStyle = HeadingStyle(16, "orange"),
+    val h5: HeadingStyle = HeadingStyle(15, "vermilion"),
+    val h6: HeadingStyle = HeadingStyle(14, "reddish_purple"),
+) {
+    fun style(level: Int): HeadingStyle = when (level) {
+        1 -> h1
+        2 -> h2
+        3 -> h3
+        4 -> h4
+        5 -> h5
+        else -> h6
+    }
+
+    fun with(level: Int, style: HeadingStyle): HeadingsSettings = when (level) {
+        1 -> copy(h1 = style)
+        2 -> copy(h2 = style)
+        3 -> copy(h3 = style)
+        4 -> copy(h4 = style)
+        5 -> copy(h5 = style)
+        else -> copy(h6 = style)
+    }
+
+    /** Compact payload for the native editor, one array entry per level. */
+    fun toNativeJson(): String {
+        val styles = JSONArray()
+        for (level in 1..6) {
+            val style = style(level)
+            styles.put(
+                JSONObject()
+                    .put("size", style.fontSize)
+                    .put("color", HeadingColors.rgb(style.colorName))
+                    .put("bold", style.bold)
+                    .put("italic", style.italic),
+            )
+        }
+        return styles.toString()
+    }
+}
+
 /**
  * Daily-note preferences. [format] and [folder] use the same names, defaults
  * and `{{TOKEN}}` syntax as the desktop `dailyNotes` settings block. [enabled]
@@ -25,11 +127,35 @@ data class DailyNoteSettings(
  */
 data class AppSettings(
     val textScale: Float = 1f,
+    /** Editor body text size in dp; its line pitch is derived from it. */
+    val editorFontDp: Int = AppSettingsJson.DEFAULT_EDITOR_FONT_DP,
+    /** Fenced code size in dp, independent from the body text. */
+    val codeFontDp: Int = AppSettingsJson.DEFAULT_CODE_FONT_DP,
+    /** Font for Markdown prose and other non-code text. */
+    val textFontFace: EditorFontFace = EditorFontFace.Mono,
+    /** Font for fenced/inline code and for code files. */
+    val codeFontFace: EditorFontFace = EditorFontFace.Mono,
     val autoHideChrome: Boolean = true,
     val navbarEnabled: Boolean = false,
     val defaultEditorMode: EditorMode = EditorMode.Source,
     val autoSaveDelayMs: Int = 600,
+    /** Tints the caret line in the source editor, like the desktop editor. */
+    val highlightCurrentLine: Boolean = true,
+    /**
+     * Extends the gutter wash over every visual row of a wrapped caret line.
+     * Off by default: only the row holding the caret is tinted.
+     */
+    val highlightWrappedLineInGutter: Boolean = false,
     val dailyNotes: DailyNoteSettings = DailyNoteSettings(),
+    val headings: HeadingsSettings = HeadingsSettings(),
+    /** Base color scheme; [ThemeMode.System] follows the device setting. */
+    val themeMode: ThemeMode = ThemeMode.System,
+    /** Theme used when the effective scheme is light. Empty means built-in. */
+    val lightThemeName: String = "",
+    /** Theme used when the effective scheme is dark. Empty means built-in. */
+    val darkThemeName: String = "",
+    /** ARGB accent override; null lets the theme decide. */
+    val accentColor: Int? = null,
 )
 
 /**
@@ -40,19 +166,59 @@ object AppSettingsJson {
     const val MIN_TEXT_SCALE = 0.85f
     const val MAX_TEXT_SCALE = 1.3f
 
+    /** Editor text size range, matching the desktop `editor.fontSizeBase` steps. */
+    const val MIN_EDITOR_FONT_DP = 12
+    const val MAX_EDITOR_FONT_DP = 24
+    const val DEFAULT_EDITOR_FONT_DP = 15
+
+    /** Fenced code size range. Code is allowed to be smaller than prose. */
+    const val MIN_CODE_FONT_DP = 9
+    const val MAX_CODE_FONT_DP = 24
+    const val DEFAULT_CODE_FONT_DP = 13
+
+    /** Line pitch the editor uses at [DEFAULT_EDITOR_FONT_DP]. */
+    private const val DEFAULT_EDITOR_LINE_DP = 22f
+
+    /** Line pitch that keeps the text/line proportion when the size changes. */
+    fun editorLineDp(fontDp: Int): Float =
+        DEFAULT_EDITOR_LINE_DP * fontDp / DEFAULT_EDITOR_FONT_DP
+
     fun encode(settings: AppSettings): String {
         val dailyNotes = JSONObject()
             .put("enabled", settings.dailyNotes.enabled)
             .put("format", settings.dailyNotes.format)
             .put("folder", settings.dailyNotes.folder)
             .put("template", settings.dailyNotes.template)
+        val headings = JSONObject()
+        for (level in 1..6) {
+            val style = settings.headings.style(level)
+            headings.put(
+                "h$level",
+                JSONObject()
+                    .put("fontSize", style.fontSize)
+                    .put("colorName", style.colorName)
+                    .put("bold", style.bold)
+                    .put("italic", style.italic),
+            )
+        }
         return JSONObject()
             .put("textScale", settings.textScale.toDouble())
+            .put("editorFontDp", settings.editorFontDp)
+            .put("codeFontDp", settings.codeFontDp)
+            .put("textFontFace", settings.textFontFace.name)
+            .put("codeFontFace", settings.codeFontFace.name)
             .put("autoHideChrome", settings.autoHideChrome)
             .put("navbarEnabled", settings.navbarEnabled)
             .put("defaultEditorMode", settings.defaultEditorMode.name)
             .put("autoSaveDelayMs", settings.autoSaveDelayMs)
+            .put("highlightCurrentLine", settings.highlightCurrentLine)
+            .put("highlightWrappedLineInGutter", settings.highlightWrappedLineInGutter)
             .put("dailyNotes", dailyNotes)
+            .put("headings", headings)
+            .put("themeMode", settings.themeMode.name)
+            .put("lightThemeName", settings.lightThemeName)
+            .put("darkThemeName", settings.darkThemeName)
+            .put("accentColor", settings.accentColor ?: JSONObject.NULL)
             .toString()
     }
 
@@ -66,15 +232,74 @@ object AppSettingsJson {
                     .takeIf { it.isFinite() }
                     ?.coerceIn(MIN_TEXT_SCALE, MAX_TEXT_SCALE)
                     ?: 1f,
+                editorFontDp = value.optInt("editorFontDp", DEFAULT_EDITOR_FONT_DP)
+                    .coerceIn(MIN_EDITOR_FONT_DP, MAX_EDITOR_FONT_DP),
+                codeFontDp = value.optInt("codeFontDp", DEFAULT_CODE_FONT_DP)
+                    .coerceIn(MIN_CODE_FONT_DP, MAX_CODE_FONT_DP),
+                textFontFace = runCatching {
+                    EditorFontFace.valueOf(
+                        value.optString("textFontFace", EditorFontFace.Mono.name),
+                    )
+                }.getOrDefault(EditorFontFace.Mono),
+                codeFontFace = runCatching {
+                    EditorFontFace.valueOf(
+                        value.optString("codeFontFace", EditorFontFace.Mono.name),
+                    )
+                }.getOrDefault(EditorFontFace.Mono),
                 autoHideChrome = value.optBoolean("autoHideChrome", true),
                 navbarEnabled = value.optBoolean("navbarEnabled", false),
                 defaultEditorMode = runCatching {
                     EditorMode.valueOf(value.optString("defaultEditorMode", EditorMode.Source.name))
                 }.getOrDefault(EditorMode.Source),
                 autoSaveDelayMs = value.optInt("autoSaveDelayMs", 600).coerceIn(0, 5000),
+                highlightCurrentLine = value.optBoolean("highlightCurrentLine", true),
+                highlightWrappedLineInGutter = value.optBoolean(
+                    "highlightWrappedLineInGutter",
+                    false,
+                ),
                 dailyNotes = dailyNoteSettings(value.optJSONObject("dailyNotes")),
+                headings = headingsSettings(value.optJSONObject("headings")),
+                themeMode = runCatching {
+                    ThemeMode.valueOf(value.optString("themeMode", ThemeMode.System.name))
+                }.getOrDefault(ThemeMode.System),
+                lightThemeName = value.optString(
+                    "lightThemeName",
+                    value.optString("themeName", ""),
+                ).trim(),
+                darkThemeName = value.optString(
+                    "darkThemeName",
+                    value.optString("themeName", ""),
+                ).trim(),
+                accentColor = if (value.has("accentColor") && !value.isNull("accentColor")) {
+                    value.optInt("accentColor")
+                } else {
+                    null
+                },
             )
         }.getOrDefault(AppSettings())
+    }
+
+    private fun headingsSettings(value: JSONObject?): HeadingsSettings {
+        val defaults = HeadingsSettings()
+        if (value == null) return defaults
+        return HeadingsSettings(
+            h1 = headingStyle(value.optJSONObject("h1"), defaults.h1),
+            h2 = headingStyle(value.optJSONObject("h2"), defaults.h2),
+            h3 = headingStyle(value.optJSONObject("h3"), defaults.h3),
+            h4 = headingStyle(value.optJSONObject("h4"), defaults.h4),
+            h5 = headingStyle(value.optJSONObject("h5"), defaults.h5),
+            h6 = headingStyle(value.optJSONObject("h6"), defaults.h6),
+        )
+    }
+
+    private fun headingStyle(value: JSONObject?, defaults: HeadingStyle): HeadingStyle {
+        if (value == null) return defaults
+        return HeadingStyle(
+            fontSize = value.optInt("fontSize", defaults.fontSize).coerceIn(6, 64),
+            colorName = value.optString("colorName", defaults.colorName),
+            bold = value.optBoolean("bold", defaults.bold),
+            italic = value.optBoolean("italic", defaults.italic),
+        )
     }
 
     private fun dailyNoteSettings(value: JSONObject?): DailyNoteSettings {

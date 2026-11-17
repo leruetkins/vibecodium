@@ -59,6 +59,8 @@ public final class CoreBridge {
 
     public static native String nativeSearchLocate(String query, String text);
 
+    public static native String nativeSearchLocateAll(String query, String text);
+
     public static native String nativeOutline(String text);
 
     public static native String nativeStats(String text);
@@ -84,9 +86,19 @@ public final class CoreBridge {
 
     public static native void nativeSurfaceSetTree(int id, String json);
 
+    /** Applies a theme palette (JSON produced by ThemePalette.toNativeJson()). */
+    public static native void nativeThemeSetPalette(String json);
+
     public static native void nativeSurfaceSetEditor(int id, String text, int selection, String language);
 
     public static native String nativeSurfaceTouch(int id, float x, float y, int action);
+
+    /**
+     * Runs before a tap places the caret. Returns a JSON action when the tap
+     * hit the code-block copy control or folded a code block, or an empty
+     * string when it is an ordinary caret tap.
+     */
+    public static native String nativeEditorTapAction(int id, float x, float y);
 
     /**
      * Lock-free absolute scroll request: stores the value for the next paint
@@ -101,11 +113,21 @@ public final class CoreBridge {
 
     public static native void nativeTreeSetScroll(int id, float y);
 
+    public static native void nativeTreeSetScrollX(int id, float x);
+
     public static native String nativeEditorInsert(int id, String text);
 
     public static native String nativeEditorReplace(int id, int start, int end, String text);
 
     public static native String nativeEditorDelete(int id, int before, int after);
+
+    public static native String nativeEditorUndo(int id);
+
+    public static native String nativeEditorRedo(int id);
+
+    public static native boolean nativeEditorCanUndo(int id);
+
+    public static native boolean nativeEditorCanRedo(int id);
 
     public static native void nativeEditorSelection(int id, int start, int end);
 
@@ -127,6 +149,14 @@ public final class CoreBridge {
 
     public static native void nativeEditorSetBottomInset(int id, float inset);
 
+    public static native void nativeEditorScrollToCursor(int id);
+
+    public static native void nativeEditorScrollToCursorCentered(int id);
+
+    public static native void nativeEditorSetFindHighlights(int id, String ranges, int active);
+
+    public static native void nativeEditorClearFindHighlights(int id);
+
     public static native void nativeEditorSetTopInset(int id, float inset);
 
     public static native void nativeEditorSetCaretVisible(int id, boolean visible);
@@ -134,6 +164,19 @@ public final class CoreBridge {
     public static native void nativeEditorSetInsertionHandleVisible(int id, boolean visible);
 
     public static native void nativeEditorSetPreview(int id, boolean preview);
+
+    public static native void nativeEditorSetCurrentLineHighlight(int id, boolean enabled);
+
+    public static native void nativeEditorSetGutterWrappedLineHighlight(int id, boolean enabled);
+
+    public static native void nativeEditorSetFontSize(int id, float fontDp, float lineDp);
+
+    /** Fenced-code size, independent from the body text size. */
+    public static native void nativeEditorSetCodeFontSize(int id, float fontDp);
+
+    public static native void nativeEditorSetFonts(int id, int textFace, int codeFace);
+
+    public static native void nativeEditorSetHeadings(int id, String json);
 
     public static native float nativeEditorScroll(int id);
 
@@ -144,6 +187,18 @@ public final class CoreBridge {
     public static native String nativeEditorViewport(int id);
 
     public static native void nativeEditorSetScroll(int id, float y, float x);
+
+    /** Horizontal overflow of the table under `y`, in device pixels. */
+    public static native float nativeEditorTableScrollMax(int id, float y);
+
+    /** Current horizontal pan of the table under `y`, in device pixels. */
+    public static native float nativeEditorTableScrollX(int id, float y);
+
+    /** Pans the table under `y`; the offset is stored per table. */
+    public static native void nativeEditorSetTableScroll(int id, float y, float x);
+
+    /** Toggles the table under the caret between grid and raw source. */
+    public static native boolean nativeEditorToggleTableSource(int id);
 
     public static int[] rasterizeEmoji(String text, float px) {
         if (text == null || text.isEmpty()) return null;

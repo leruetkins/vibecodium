@@ -10,11 +10,48 @@ data class NoteItem(
     val extension: String,
 )
 
-data class SearchHit(
+/** One highlighted span inside a search snippet (UTF-16 offsets, end exclusive). */
+data class MatchRange(val start: Int, val end: Int)
+
+/** One matching line in one file, with context and highlight spans. */
+data class SearchMatch(
+    val line: Int,
+    /** Absolute UTF-16 offset in the note, used to reveal the match. */
+    val offset: Int,
+    /** Length of the first match in UTF-16 units. */
+    val length: Int,
+    val snippet: String,
+    val ranges: List<MatchRange>,
+)
+
+/** All search matches for one file; the UI renders these as a collapsible group. */
+data class SearchFileResult(
     val path: String,
     val name: String,
-    val line: Int,
-    val snippet: String,
+    val score: Float = 0f,
+    val nameMatch: Boolean = false,
+    val matches: List<SearchMatch> = emptyList(),
+) {
+    /** Badge count: merged content ranges, excluding a filename-only hit. */
+    val matchCount: Int get() = matches.sumOf { it.ranges.size }
+}
+
+/** One in-page find match, in UTF-16 offsets of the open note. */
+data class FindMatch(val start: Int, val end: Int, val line: Int)
+
+/** State of the in-page find/replace bar. */
+data class FindUiState(
+    val open: Boolean = false,
+    val query: String = "",
+    val replace: String = "",
+    val replaceOpen: Boolean = false,
+    val caseSensitive: Boolean = false,
+    val wholeWord: Boolean = false,
+    val matches: List<FindMatch> = emptyList(),
+    /** -1 when the query has no matches. */
+    val active: Int = -1,
+    val truncated: Boolean = false,
+    val scanning: Boolean = false,
 )
 
 /** One ranked path from the search index, before its body is verified. */
@@ -25,8 +62,14 @@ data class SearchCandidate(
     val count: Int,
 )
 
-/** A candidate body resolved to its first matching line and snippet. */
-data class LocatedHit(val line: Int, val snippet: String)
+/** Raw located match from Rust; offsets are char-based until SearchIndex maps them. */
+data class LocatedMatch(
+    val line: Int,
+    val column: Int,
+    val length: Int,
+    val snippet: String,
+    val ranges: List<MatchRange>,
+)
 
 data class Heading(val level: Int, val text: String, val line: Int)
 
@@ -105,6 +148,9 @@ enum class DrawerMode { Files, Search, Bookmarks, Recent }
 
 enum class EditorMode { Source, Preview }
 
+/** Editor font family. [nativeValue] matches the Rust core's `Face` enum. */
+enum class EditorFontFace(val nativeValue: Int) { System(0), Mono(1), Serif(2) }
+
 /** Which progress counter the UI should show while a sync is running. */
 enum class SyncProgressKind { Preparing, ReadingLocal, Transferring }
 
@@ -143,19 +189,36 @@ data class UiState(
     val activeTab: Int = -1,
     val bookmarks: Set<String> = emptySet(),
     val editorMode: EditorMode = EditorMode.Source,
+    /** Whether the native editor has undo/redo steps available. */
+    val editorCanUndo: Boolean = false,
+    val editorCanRedo: Boolean = false,
     val lines: List<MarkdownLine> = emptyList(),
     val markdownText: String = "",
     val drawer: Drawer? = null,
     val drawerMode: DrawerMode = DrawerMode.Files,
-    val tabSwitcher: Boolean = false,
     val settingsOpen: Boolean = false,
     /** Section name inside the settings sheet, or null for the root list. */
     val settingsSection: String? = null,
     val settings: AppSettings = AppSettings(),
+    /** Resolved Obsidian theme tokens for the current theme selection. */
+    val themeDarkPalette: ThemePalette = ThemePalette.defaultDark(),
+    val themeLightPalette: ThemePalette = ThemePalette.defaultLight(),
+    val themeWarnings: List<String> = emptyList(),
+    val installedThemes: List<InstalledTheme> = emptyList(),
+    val themeCatalog: List<ThemeEntry> = emptyList(),
+    val themeUpdates: Map<String, String> = emptyMap(),
+    val themeCatalogLoading: Boolean = false,
+    val themeCheckingUpdates: Boolean = false,
+    /** Theme name currently being installed/removed. */
+    val themeBusy: String? = null,
+    val themeError: String? = null,
     val vaultSync: VaultSyncSettings = VaultSyncSettings(),
     val sync: SyncUiState = SyncUiState(),
     val searchQuery: String = "",
-    val searchHits: List<SearchHit> = emptyList(),
+    val searchResults: List<SearchFileResult> = emptyList(),
+    /** Search files the user folded; paths survive result refreshes. */
+    val searchCollapsedPaths: Set<String> = emptySet(),
+    val find: FindUiState = FindUiState(),
     val headings: List<Heading> = emptyList(),
     val stats: DocStats = DocStats(0, 0, 0),
     /** Recently opened notes, most recent first, persisted per vault. */
@@ -170,6 +233,8 @@ data class UiState(
     val explorerRenamePath: String? = null,
     val explorerRenameValue: String = "",
     val explorerRenameFolder: Boolean = false,
+    /** Note to open once its inline rename commits; created from the row menu. */
+    val openAfterRenamePath: String? = null,
     /** Explorer row whose action menu is open. */
     val explorerMenuPath: String? = null,
     /** Explorer row waiting for a destination folder for the move action. */
@@ -217,19 +282,6 @@ object CoreJson {
 
     fun noteText(raw: String): String = data(raw).optString("text")
 
-    fun matches(raw: String): List<SearchHit> {
-        val array = data(raw).optJSONArray("matches") ?: JSONArray()
-        return List(array.length()) { index ->
-            val value = array.getJSONObject(index)
-            SearchHit(
-                path = value.optString("path"),
-                name = value.optString("name"),
-                line = value.optInt("line"),
-                snippet = value.optString("snippet"),
-            )
-        }
-    }
-
     /** Ranked paths from the search index (BM25F order). */
     fun searchCandidates(raw: String): List<SearchCandidate> {
         val array = data(raw).optJSONArray("matches") ?: JSONArray()
@@ -244,13 +296,27 @@ object CoreJson {
         }
     }
 
-    /** Line + snippet resolved against one candidate body. */
-    fun searchLocated(raw: String): LocatedHit {
-        val value = data(raw)
-        return LocatedHit(
-            line = value.optInt("line", 0),
-            snippet = value.optString("snippet"),
-        )
+    /** All matching lines resolved against one candidate body. */
+    fun searchLocatedAll(raw: String): List<LocatedMatch> {
+        val array = data(raw).optJSONArray("matches") ?: JSONArray()
+        return List(array.length()) { index ->
+            val value = array.getJSONObject(index)
+            val rawRanges = value.optJSONArray("ranges") ?: JSONArray()
+            val ranges = List(rawRanges.length()) { rangeIndex ->
+                val range = rawRanges.getJSONArray(rangeIndex)
+                MatchRange(
+                    start = range.optInt(0),
+                    end = range.optInt(1),
+                )
+            }
+            LocatedMatch(
+                line = value.optInt("line", 0),
+                column = value.optInt("column", 0),
+                length = value.optInt("length", 0),
+                snippet = value.optString("snippet"),
+                ranges = ranges,
+            )
+        }
     }
 
     /**

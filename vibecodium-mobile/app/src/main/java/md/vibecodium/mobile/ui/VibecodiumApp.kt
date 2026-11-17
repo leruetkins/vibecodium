@@ -22,6 +22,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -34,9 +35,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -48,19 +51,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -83,6 +86,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Menu
@@ -130,8 +134,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.focus.FocusRequester
@@ -139,6 +148,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -150,6 +160,8 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
@@ -180,13 +192,20 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntRect
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
 import kotlin.math.roundToInt
 import androidx.compose.ui.viewinterop.AndroidView
 import md.vibecodium.mobile.AppSettingsJson
+import md.vibecodium.mobile.BuildConfig
 import md.vibecodium.mobile.CoreBridge
 import md.vibecodium.mobile.CoreJson
 import md.vibecodium.mobile.Drawer
@@ -195,6 +214,10 @@ import md.vibecodium.mobile.KnownVault
 import md.vibecodium.mobile.VaultLocator
 import md.vibecodium.mobile.DocStats
 import md.vibecodium.mobile.EditorMode
+import md.vibecodium.mobile.EditorFontFace
+import md.vibecodium.mobile.HeadingsSettings
+import md.vibecodium.mobile.HeadingColors
+import md.vibecodium.mobile.HeadingStyle
 import md.vibecodium.mobile.CodeColors
 import md.vibecodium.mobile.LocalCodeColors
 import md.vibecodium.mobile.LIVE_MODEL_CHAR_LIMIT
@@ -208,11 +231,19 @@ import md.vibecodium.mobile.NoteItem
 import md.vibecodium.mobile.SyncFileCategory
 import md.vibecodium.mobile.SyncProgressKind
 import md.vibecodium.mobile.Tab
+import md.vibecodium.mobile.ThemeEntry
+import md.vibecodium.mobile.ThemeMode
+import md.vibecodium.mobile.ThemeSlot
 import md.vibecodium.mobile.UiState
 import md.vibecodium.mobile.VibecodiumController
+import md.vibecodium.mobile.SearchFileResult
+import md.vibecodium.mobile.SearchMatch
+import md.vibecodium.mobile.FindUiState
 import md.vibecodium.mobile.ExplorerRow
 import md.vibecodium.mobile.expandDailyNoteFormat
+import md.vibecodium.mobile.explorerDisplayName
 import md.vibecodium.mobile.filterExplorerTree
+import md.vibecodium.mobile.filteredAncestorsForQuery
 import md.vibecodium.mobile.flattenExplorerTree
 import md.vibecodium.mobile.indentAtCursor
 import md.vibecodium.mobile.outdentAtCursor
@@ -229,7 +260,13 @@ private val NavbarHeight = 52.dp
 private val ViewHeaderHeight = 44.dp
 
 /** Top margin for the floating header pills so they hover below the status bar. */
-private val ViewHeaderTopPadding = 8.dp
+private val ViewHeaderTopPadding = 0.dp
+
+/** Second floating action in the header gutter, right under the explorer toggle. */
+private val NoteActionTop = 48.dp
+
+/** Pitch between stacked floating actions: 44 dp button plus a 4 dp gap. */
+private val NoteActionStep = 48.dp
 
 /** `lucide-folder-plus`, Obsidian's new-folder nav action. */
 private val NewFolderIcon: ImageVector = ImageVector.Builder(
@@ -372,6 +409,36 @@ private val SyncArrowsIcon: ImageVector = ImageVector.Builder(
     }
 }.build()
 
+/** Material `undo`, matching the desktop toolbar action. */
+private val UndoIcon: ImageVector = ImageVector.Builder(
+    name = "undo",
+    defaultWidth = 24.dp,
+    defaultHeight = 24.dp,
+    viewportWidth = 24f,
+    viewportHeight = 24f,
+).addPath(
+    pathData = addPathNodes(
+        "M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 " +
+            "5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z",
+    ),
+    fill = SolidColor(Color.Black),
+).build()
+
+/** Material `redo`, the counterpart of [UndoIcon]. */
+private val RedoIcon: ImageVector = ImageVector.Builder(
+    name = "redo",
+    defaultWidth = 24.dp,
+    defaultHeight = 24.dp,
+    viewportWidth = 24f,
+    viewportHeight = 24f,
+).addPath(
+    pathData = addPathNodes(
+        "M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 " +
+            "4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z",
+    ),
+    fill = SolidColor(Color.Black),
+).build()
+
 /** `lucide-history`, the desktop client's recent-files icon. */
 private val HistoryIcon: ImageVector = ImageVector.Builder(
     name = "history",
@@ -484,6 +551,32 @@ private val TrashIcon: ImageVector = ImageVector.Builder(
     }
 }.build()
 
+/** A tab with a cross: "close all tabs". */
+private val CloseTabsIcon: ImageVector = ImageVector.Builder(
+    name = "close-tabs",
+    defaultWidth = 24.dp,
+    defaultHeight = 24.dp,
+    viewportWidth = 24f,
+    viewportHeight = 24f,
+).apply {
+    path(fill = null, stroke = SolidColor(Color.Black), strokeLineWidth = 1.75f) {
+        moveTo(5f, 4f)
+        lineTo(19f, 4f)
+        quadTo(21f, 4f, 21f, 6f)
+        lineTo(21f, 18f)
+        quadTo(21f, 20f, 19f, 20f)
+        lineTo(5f, 20f)
+        quadTo(3f, 20f, 3f, 18f)
+        lineTo(3f, 6f)
+        quadTo(3f, 4f, 5f, 4f)
+        close()
+        moveTo(9f, 9f)
+        lineTo(15f, 15f)
+        moveTo(15f, 9f)
+        lineTo(9f, 15f)
+    }
+}.build()
+
 /** `lucide-keyboard`, shown after placing the caret before the IME opens. */
 private val KeyboardIcon: ImageVector = ImageVector.Builder(
     name = "keyboard",
@@ -527,6 +620,23 @@ private val KeyboardIcon: ImageVector = ImageVector.Builder(
     }
 }.build()
 
+/** Material `remove`: the bar of `add` without the upright stroke. */
+private val MinusIcon: ImageVector = ImageVector.Builder(
+    name = "remove",
+    defaultWidth = 24.dp,
+    defaultHeight = 24.dp,
+    viewportWidth = 24f,
+    viewportHeight = 24f,
+).apply {
+    path(fill = SolidColor(Color.Black)) {
+        moveTo(5f, 11f)
+        lineTo(19f, 11f)
+        lineTo(19f, 13f)
+        lineTo(5f, 13f)
+        close()
+    }
+}.build()
+
 /** Obsidian sidebar-toggle: outer rect (1,2,22,20,r4) + inner rect (4,5,2,14,r2). */
 private val SidebarToggleIcon: ImageVector = ImageVector.Builder(
     name = "sidebar-toggle",
@@ -559,6 +669,53 @@ private val SidebarToggleIcon: ImageVector = ImageVector.Builder(
         curveTo(4.45f, 19f, 4f, 18.55f, 4f, 18f)
         lineTo(4f, 6f)
         curveTo(4f, 5.45f, 4.45f, 5f, 5f, 5f)
+        close()
+    }
+}.build()
+
+/** `lucide-sun`, shown in dark mode to switch to light. */
+private val SunIcon: ImageVector = ImageVector.Builder(
+    name = "sun",
+    defaultWidth = 24.dp,
+    defaultHeight = 24.dp,
+    viewportWidth = 24f,
+    viewportHeight = 24f,
+).apply {
+    path(fill = null, stroke = SolidColor(Color.Black), strokeLineWidth = 1.75f) {
+        moveTo(16f, 12f)
+        arcTo(4f, 4f, 0f, true, true, 8f, 12f)
+        arcTo(4f, 4f, 0f, true, true, 16f, 12f)
+        moveTo(12f, 2f)
+        lineTo(12f, 4f)
+        moveTo(12f, 20f)
+        lineTo(12f, 22f)
+        moveTo(2f, 12f)
+        lineTo(4f, 12f)
+        moveTo(20f, 12f)
+        lineTo(22f, 12f)
+        moveTo(4.93f, 4.93f)
+        lineTo(6.34f, 6.34f)
+        moveTo(17.66f, 17.66f)
+        lineTo(19.07f, 19.07f)
+        moveTo(4.93f, 19.07f)
+        lineTo(6.34f, 17.66f)
+        moveTo(17.66f, 6.34f)
+        lineTo(19.07f, 4.93f)
+    }
+}.build()
+
+/** `lucide-moon`, shown in light mode to switch to dark. */
+private val MoonIcon: ImageVector = ImageVector.Builder(
+    name = "moon",
+    defaultWidth = 24.dp,
+    defaultHeight = 24.dp,
+    viewportWidth = 24f,
+    viewportHeight = 24f,
+).apply {
+    path(fill = SolidColor(Color.Black)) {
+        moveTo(21f, 12.79f)
+        arcTo(9f, 9f, 0f, true, true, 11.21f, 3f)
+        arcTo(7f, 7f, 0f, false, false, 21f, 12.79f)
         close()
     }
 }.build()
@@ -624,7 +781,16 @@ private val EditorLineHeight = 22.sp
 fun VibecodiumApp(controller: VibecodiumController) {
     val state = controller.state
     val density = LocalDensity.current
-    VibecodiumTheme {
+    val dark = when (state.settings.themeMode) {
+        ThemeMode.Dark -> true
+        ThemeMode.Light -> false
+        ThemeMode.System -> isSystemInDarkTheme()
+    }
+    val palette = if (dark) state.themeDarkPalette else state.themeLightPalette
+    LaunchedEffect(dark, palette) {
+        controller.applyNativePalette(dark)
+    }
+    VibecodiumTheme(palette) {
         CompositionLocalProvider(
             LocalDensity provides Density(
                 density.density,
@@ -633,7 +799,7 @@ fun VibecodiumApp(controller: VibecodiumController) {
         ) {
             BackHandler(
                 enabled = state.vaultChooserOpen || state.settingsOpen || state.drawer != null ||
-                    state.tabSwitcher || state.viewerPath != null || state.historyIndex > 0 ||
+                    state.viewerPath != null || state.historyIndex > 0 ||
                     state.explorerMenuPath != null || state.movePath != null ||
                     state.explorerRenamePath != null,
             ) {
@@ -650,7 +816,9 @@ fun VibecodiumApp(controller: VibecodiumController) {
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
                         .windowInsetsBottomHeight(WindowInsets.navigationBars)
-                        .background(MaterialTheme.colorScheme.background),
+                        // The system navigation bar is deliberately independent
+                        // of the Obsidian theme.
+                        .background(Color.Black),
                 )
                 state.message?.let { message ->
                     MessageBar(message) { controller.dismissMessage() }
@@ -706,7 +874,7 @@ private fun StartScreen(state: UiState, controller: VibecodiumController) {
             .padding(24.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        Text("vibecodium", fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
+        Text("Vibecodium", fontSize = 30.sp, fontWeight = FontWeight.SemiBold)
         Text(
             "Rust core · Compose shell",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -765,10 +933,21 @@ private data class EditorSlice(
     val markdownText: String,
     val bookmarks: Set<String>,
     val stats: DocStats,
+    val headings: HeadingsSettings,
+    val highlightCurrentLine: Boolean,
+    val highlightWrappedLineInGutter: Boolean,
+    val find: FindUiState = FindUiState(),
     val settingsOpen: Boolean = false,
     val overlayOpen: Boolean = false,
     val focusRequestId: Long = 0L,
 )
+
+/**
+ * New tabs are appended to [tabs], so the reversed indices show the most
+ * recently opened or created note at the top. Switching between existing tabs
+ * does not change their position.
+ */
+internal fun newestFirstTabOrder(tabs: List<Tab>): List<Int> = tabs.indices.reversed().toList()
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -784,10 +963,13 @@ private fun PhoneShell(state: UiState, controller: VibecodiumController) {
                 markdownText = current.markdownText,
                 bookmarks = current.bookmarks,
                 stats = current.stats,
+                headings = current.settings.headings,
+                highlightCurrentLine = current.settings.highlightCurrentLine,
+                highlightWrappedLineInGutter = current.settings.highlightWrappedLineInGutter,
+                find = current.find,
                 settingsOpen = current.settingsOpen,
                 overlayOpen = current.settingsOpen || current.renamePath != null ||
-                    current.deletePath != null || current.vaultChooserOpen ||
-                    current.tabSwitcher,
+                    current.deletePath != null || current.vaultChooserOpen,
                 focusRequestId = current.focusRequestId,
             )
         }
@@ -797,6 +979,7 @@ private fun PhoneShell(state: UiState, controller: VibecodiumController) {
     // visible "squeeze"). Own the bottom inset here, with the last real height,
     // instead of letting systemBarsPadding apply an animated value.
     val density = LocalDensity.current
+    val palette = LocalVibecodiumPalette.current
     val orientation = LocalConfiguration.current.orientation
     val navBarBottomPx = WindowInsets.navigationBars.getBottom(density)
     var stableNavBarBottomPx by rememberSaveable(orientation) { mutableStateOf(navBarBottomPx) }
@@ -804,19 +987,23 @@ private fun PhoneShell(state: UiState, controller: VibecodiumController) {
         if (navBarBottomPx > 0) stableNavBarBottomPx = navBarBottomPx
     }
     val stableNavBottom = with(density) { stableNavBarBottomPx.toDp() }
+    val imeVisible = WindowInsets.isImeVisible
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .statusBarsPadding()
+            // safeDrawing also covers display cutouts and caption bars that
+            // tablets report instead of a plain status-bar inset.
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
             .windowInsetsPadding(
                 WindowInsets.navigationBars.only(WindowInsetsSides.Horizontal),
             )
             .padding(bottom = stableNavBottom),
     ) {
         val drawerWidth = phoneDrawerWidth(maxWidth)
+        val leftDrawerWidth = leftDrawerWidth(maxWidth)
+        val closeButtonX = leftDrawerWidth.coerceAtMost((maxWidth - CloseButtonSlot).coerceAtLeast(0.dp))
         val navbarEnabled = state.settings.navbarEnabled
-        val imeVisible = WindowInsets.isImeVisible
         val focusManager = LocalFocusManager.current
         var chromeHidden by remember { mutableStateOf(false) }
         val lastAnchor = remember { floatArrayOf(0f) }
@@ -836,7 +1023,6 @@ private fun PhoneShell(state: UiState, controller: VibecodiumController) {
         }
         LaunchedEffect(
             state.drawer,
-            state.tabSwitcher,
             state.viewerPath,
             state.settingsOpen,
             editor.value.activeTab,
@@ -891,9 +1077,16 @@ private fun PhoneShell(state: UiState, controller: VibecodiumController) {
             EditorArea(
                 editor.value,
                 controller,
+                state.settings.editorFontDp,
+                state.settings.codeFontDp,
+                state.settings.textFontFace,
+                state.settings.codeFontFace,
+                state.settings.headings,
                 imeVisible,
                 navbarEnabled,
                 chromeProgress,
+                // Drawers are full-screen browsing surfaces; the keyboard
+                // must not cover them.
                 state.drawer != null,
                 onEditorScroll,
             )
@@ -923,6 +1116,16 @@ private fun PhoneShell(state: UiState, controller: VibecodiumController) {
                 ) { controller.toggleDrawer(Drawer.Left) }
             }
 
+            if (controller.popupCover) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(2.dp)
+                        .background(palette.overlay.compositeOver(palette.background)),
+                )
+            }
+
             Box(
                 Modifier
                     .align(Alignment.BottomCenter)
@@ -948,7 +1151,8 @@ private fun PhoneShell(state: UiState, controller: VibecodiumController) {
             }
 
             if (state.drawer == Drawer.Left) {
-                DrawerBackdrop {
+                // Opaque: the editor behind the explorer must not show through.
+                DrawerBackdrop(alpha = 1f) {
                     focusManager.clearFocus()
                     controller.closeOverlays()
                 }
@@ -959,18 +1163,12 @@ private fun PhoneShell(state: UiState, controller: VibecodiumController) {
             LeftDrawer(
                 state,
                 controller,
-                Modifier
+                renameActive = state.explorerRenamePath != null,
+                modifier = Modifier
                     .align(Alignment.CenterStart)
-                    .width(drawerWidth)
+                    .width(leftDrawerWidth)
                     .fillMaxHeight()
-                    // Keep the drawer above the IME only while the inline
-                    // rename field is visible. Applying it all the time made
-                    // the tree resize (squeeze/expand) whenever the keyboard
-                    // hid after opening the drawer.
-                    .then(
-                        if (state.explorerRenamePath != null) Modifier.imePadding() else Modifier,
-                    )
-                    .offset(x = if (state.drawer == Drawer.Left) 0.dp else -drawerWidth)
+                    .offset(x = if (state.drawer == Drawer.Left) 0.dp else -leftDrawerWidth)
                     .then(
                         if (state.drawer == Drawer.Left) {
                             Modifier
@@ -979,9 +1177,70 @@ private fun PhoneShell(state: UiState, controller: VibecodiumController) {
                         },
                     ),
             )
+            // The close button sits outside the drawer's right edge, in the
+            // strip the drawer width reserves for it. Its top edge lines up
+            // with the top of the drawer and of the note header, so it reads
+            // as part of the same toolbar row.
+            Box(
+                Modifier
+                    .align(Alignment.TopStart)
+                    .offset(x = closeButtonX)
+                    .size(CloseButtonSlot, CloseButtonSize)
+                    .then(
+                        if (state.drawer == Drawer.Left) {
+                            Modifier
+                        } else {
+                            Modifier.semantics { invisibleToUser() }
+                        },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (state.drawer == Drawer.Left) {
+                    FloatingIconButton(
+                        icon = Icons.Default.Close,
+                        description = "Close explorer",
+                        modifier = Modifier.size(CloseButtonSize),
+                    ) {
+                        focusManager.clearFocus()
+                        controller.closeOverlays()
+                    }
+                }
+            }
+
+            if (state.drawer == Drawer.Left) {
+                // Theme and settings live in the same right-side strip as the
+                // close button, but at the bottom: theme above settings.
+                Column(
+                    Modifier
+                        .align(Alignment.CenterStart)
+                        .offset(x = closeButtonX)
+                        .fillMaxHeight()
+                        .width(CloseButtonSlot),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.Bottom),
+                ) {
+                    FloatingIconButton(
+                        icon = if (palette.dark) SunIcon else MoonIcon,
+                        description = if (palette.dark) {
+                            "Switch to light theme"
+                        } else {
+                            "Switch to dark theme"
+                        },
+                        modifier = Modifier.size(CloseButtonSize),
+                    ) { controller.toggleThemeMode() }
+                    FloatingIconButton(
+                        icon = Icons.Default.Settings,
+                        description = "Settings",
+                        modifier = Modifier.size(CloseButtonSize),
+                    ) {
+                        focusManager.clearFocus()
+                        controller.openSettings()
+                    }
+                }
+            }
 
             if (state.drawer == Drawer.Right) {
-                DrawerBackdrop {
+                DrawerBackdrop(alpha = 1f) {
                     focusManager.clearFocus()
                     controller.closeOverlays()
                 }
@@ -993,10 +1252,6 @@ private fun PhoneShell(state: UiState, controller: VibecodiumController) {
                         .width(drawerWidth)
                         .fillMaxHeight(),
                 )
-            }
-
-            if (state.tabSwitcher) {
-                TabSwitcher(state, controller, Modifier.fillMaxSize())
             }
 
             if (state.viewerPath != null) {
@@ -1018,10 +1273,15 @@ private fun PhoneShell(state: UiState, controller: VibecodiumController) {
 private fun EditorArea(
     editor: EditorSlice,
     controller: VibecodiumController,
+    editorFontDp: Int,
+    codeFontDp: Int,
+    textFontFace: EditorFontFace,
+    codeFontFace: EditorFontFace,
+    headings: HeadingsSettings,
     imeVisible: Boolean,
     navbarEnabled: Boolean,
     chromeProgress: State<Float>,
-    drawerOpen: Boolean,
+    keyboardHidden: Boolean,
     onEditorScroll: (Float, Float, Boolean) -> Unit,
 ) {
     val density = LocalDensity.current
@@ -1050,12 +1310,19 @@ private fun EditorArea(
             editor,
             tab,
             controller,
+            editorFontDp,
+            codeFontDp,
+            textFontFace,
+            codeFontFace,
+            headings,
             imeVisible,
             navbarEnabled,
             bottomInsetPx,
             chromeProgress,
-            drawerOpen,
+            keyboardHidden,
             onEditorScroll,
+            editor.highlightCurrentLine,
+            editor.highlightWrappedLineInGutter,
         )
     }
 }
@@ -1066,21 +1333,57 @@ private fun phoneDrawerWidth(maxWidth: Dp): Dp {
     return (maxWidth * 0.84f).coerceIn(300.dp, minOf(420.dp, maxWidth))
 }
 
+/** Width of the strip right of the left drawer that holds its close button. */
+private val CloseButtonSlot = 56.dp
+
+/** Height of the drawer's top section bar, matching the note header actions. */
+private val DrawerTopBarHeight = 44.dp
+
+/** Same 44 dp circle as the open note's header actions. */
+private val CloseButtonSize = DrawerTopBarHeight
+
+/** Panel corners, curved like the note header pills: half the 44 dp header. */
+private val PanelCornerRadius = ViewHeaderHeight / 2
+
+/** Height of the dissolve scrim at the top and bottom of the file tree. */
+private val TreeEdgeFade = 20.dp
+
+/** Left drawer keeps a gutter on the right so the close button never covers it. */
+private fun leftDrawerWidth(maxWidth: Dp): Dp {
+    val gutter = CloseButtonSlot
+    if (maxWidth <= gutter + 200.dp) return maxWidth
+    return phoneDrawerWidth(maxWidth).coerceAtMost(maxWidth - gutter)
+}
+
 @Composable
 private fun EditorScreen(
     state: EditorSlice,
     tab: Tab,
     controller: VibecodiumController,
+    editorFontDp: Int,
+    codeFontDp: Int,
+    textFontFace: EditorFontFace,
+    codeFontFace: EditorFontFace,
+    headings: HeadingsSettings,
     imeVisible: Boolean,
     navbarEnabled: Boolean,
     bottomInsetPx: Float,
     chromeProgress: State<Float>,
-    drawerOpen: Boolean,
+    keyboardHidden: Boolean,
     onEditorScroll: (Float, Float, Boolean) -> Unit,
+    highlightCurrentLine: Boolean,
+    highlightWrappedLineInGutter: Boolean,
 ) {
     val bottomInset = if (imeVisible || !navbarEnabled) 0.dp else NavbarHeight + 12.dp
     val preview = state.editorMode == EditorMode.Preview
     val topInsetPx = with(LocalDensity.current) { (ViewHeaderTopPadding + ViewHeaderHeight + 10.dp).toPx() }
+    val findBarSpace = if (state.find.open) {
+        (if (state.find.replaceOpen) 92.dp else 54.dp)
+    } else {
+        0.dp
+    }
+    val editorTopInsetPx = topInsetPx +
+        with(LocalDensity.current) { findBarSpace.toPx() }
     var editorView by remember { mutableStateOf<NativeEditorView?>(null) }
     var keyboardPrompt by remember { mutableStateOf(!preview) }
     val onViewReady: (NativeEditorView) -> Unit = remember { { editorView = it } }
@@ -1104,8 +1407,8 @@ private fun EditorScreen(
             }
         }
     }
-    LaunchedEffect(drawerOpen) {
-        if (drawerOpen) {
+    LaunchedEffect(keyboardHidden) {
+        if (keyboardHidden) {
             editorView?.hideKeyboard()
         } else if (!preview) {
             editorView?.focusEditor()
@@ -1113,6 +1416,11 @@ private fun EditorScreen(
     }
     var prevImeVisible by remember { mutableStateOf(false) }
     LaunchedEffect(imeVisible) {
+        if (imeVisible && !prevImeVisible && !preview) {
+            // A floating keyboard does not change the window insets, so the
+            // native inset handler cannot reveal the caret for it.
+            editorView?.onKeyboardShown()
+        }
         if (prevImeVisible && !imeVisible && !preview) {
             keyboardPrompt = true
             editorView?.onKeyboardDismissed()
@@ -1149,30 +1457,51 @@ private fun EditorScreen(
             state,
             controller,
             tab,
-            topInsetPx,
+            editorFontDp,
+            codeFontDp,
+            textFontFace,
+            codeFontFace,
+            headings,
+            editorTopInsetPx,
             bottomInsetPx,
             preview,
             onEditorScroll,
             onViewReady,
             onCaretPlaced,
+            highlightCurrentLine,
+            highlightWrappedLineInGutter,
         )
-        Box(
-            Modifier
-                .align(Alignment.TopCenter)
-                .fillMaxWidth()
-                .padding(top = ViewHeaderTopPadding)
-                .graphicsLayer {
-                    alpha = chromeProgress.value
-                    translationY = -(ViewHeaderHeight + ViewHeaderTopPadding).toPx() * (1f - chromeProgress.value)
-                }
-                .semantics {
-                    if (chromeProgress.value < 0.05f) invisibleToUser()
-                },
-        ) {
-            ViewHeader(state, tab, controller)
+        if (state.find.open) {
+            Box(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        // Follow the floating header: when scrolling down hides
+                        // the chrome, the find panel must not stay pinned below
+                        // the empty header slot.
+                        translationY = -(ViewHeaderHeight + ViewHeaderTopPadding)
+                            .toPx() * (1f - chromeProgress.value)
+                    }
+                    .padding(
+                        start = 8.dp,
+                        end = 8.dp,
+                        top = ViewHeaderTopPadding + ViewHeaderHeight + 4.dp,
+                    ),
+            ) {
+                FindBar(state.find, sourceMode = !preview, controller)
+            }
         }
+        // Drawn before the header so the popup page cover, which the header
+        // paints, also hides this button while a menu is open.
         if (!preview && keyboardPrompt && !imeVisible) {
-            val bottomPadding = if (navbarEnabled) NavbarHeight + 16.dp else 16.dp
+            // The navbar slides down with the chrome; the keyboard button
+            // follows the same progress instead of leaving an empty gap.
+            val bottomPadding = if (navbarEnabled) {
+                16.dp + NavbarHeight * chromeProgress.value
+            } else {
+                16.dp
+            }
             Surface(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -1193,37 +1522,284 @@ private fun EditorScreen(
                         KeyboardIcon,
                         contentDescription = "Show keyboard",
                         modifier = Modifier.size(24.dp),
-                        tint = Color.White,
+                        tint = MaterialTheme.colorScheme.onSurface,
                     )
                 }
             }
         }
+        Box(
+            Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .padding(top = ViewHeaderTopPadding)
+                .graphicsLayer {
+                    alpha = chromeProgress.value
+                    translationY = -(ViewHeaderHeight + ViewHeaderTopPadding).toPx() * (1f - chromeProgress.value)
+                }
+                .semantics {
+                    if (chromeProgress.value < 0.05f) invisibleToUser()
+                },
+        ) {
+            ViewHeader(state, tab, controller, onHideKeyboard = { editorView?.hideKeyboard() })
+        }
     }
 }
 
+/** Places the full-width tab menu right below its anchor, flipping when needed. */
+private class TabMenuPositionProvider(
+    private val gap: Int,
+    private val left: Int,
+) : PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowSize: IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize,
+    ): IntOffset {
+        val below = windowSize.height - (anchorBounds.bottom + gap)
+        val above = anchorBounds.top - gap
+        return if (popupContentSize.height <= below || below >= above) {
+            IntOffset(left, anchorBounds.bottom + gap)
+        } else {
+            IntOffset(
+                left,
+                (anchorBounds.top - gap - popupContentSize.height).coerceAtLeast(0),
+            )
+        }
+    }
+}
+
+/** Positions the full-screen dim layer used by the tab menu. */
+private object FullScreenPositionProvider : PopupPositionProvider {
+    override fun calculatePosition(
+        anchorBounds: IntRect,
+        windowSize: IntSize,
+        layoutDirection: LayoutDirection,
+        popupContentSize: IntSize,
+    ): IntOffset = IntOffset.Zero
+}
+
+/**
+ * Obsidian-style tab dropdown: a boundeded full-width LazyColumn under the
+ * title pill with its own scrollbar (the stock DropdownMenu cannot host one).
+ */
 @Composable
-private fun ViewHeader(state: EditorSlice, tab: Tab, controller: VibecodiumController) {
+private fun TabsDropdown(
+    state: EditorSlice,
+    controller: VibecodiumController,
+    anchorBottomPx: Int,
+    onDismiss: () -> Unit,
+) {
+    val density = LocalDensity.current
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+    // The list starts where the file-name pill starts; the dimmed note stays
+    // visible in the empty gutter on the left.
+    val leftInset = 60.dp
+    val rightInset = 12.dp
+    val menuWidth = (screenWidth - leftInset - rightInset).coerceAtLeast(200.dp)
+    // The Popup window starts below the status bar, while the anchor is in
+    // window coordinates, so subtract the status-bar inset for the offset.
+    val statusBarTopPx = WindowInsets.statusBars.getTop(density)
+    val navBarBottomPx = WindowInsets.navigationBars.getBottom(density)
+    val gapPx = with(density) { 4.dp.roundToPx() }
+    val menuTopScreenPx = anchorBottomPx + gapPx
+    val menuOffsetY = with(density) {
+        (menuTopScreenPx - statusBarTopPx).coerceAtLeast(0).toDp()
+    }
+    // The keyboard is hidden before the menu opens; keep room for the system
+    // navigation bar so the last row is never covered.
+    val maxMenuHeight = with(density) {
+        (screenHeight.toPx() - menuTopScreenPx - navBarBottomPx - 8.dp.toPx())
+            .coerceAtLeast(140.dp.toPx())
+            .toDp()
+    }
+    val footerHeight = 44.dp
+    val footerGap = 6.dp
+    val listMaxHeight = (maxMenuHeight - footerHeight - footerGap).coerceAtLeast(72.dp)
+    val tabRowHeight = 54.dp
+    val tabOrder = remember(state.tabs) { newestFirstTabOrder(state.tabs) }
+    val tabEntries = remember(state.tabs, state.activeTab, state.bookmarks, tabOrder) {
+        tabOrder.map { index ->
+            val tab = state.tabs[index]
+            TabListEntry(
+                index = index,
+                tab = tab,
+                active = index == state.activeTab,
+                bookmarked = tab.path in state.bookmarks,
+            )
+        }
+    }
+    val listHeight = (tabRowHeight * tabEntries.size).coerceAtMost(listMaxHeight)
+    val tabColors = TabListColors(
+        activeBackground = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f).toArgb(),
+        text = MaterialTheme.colorScheme.onSurface.toArgb(),
+        muted = MaterialTheme.colorScheme.onSurfaceVariant.toArgb(),
+        accent = MaterialTheme.colorScheme.primary.toArgb(),
+    )
+    Popup(
+        popupPositionProvider = FullScreenPositionProvider,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(
+            focusable = true,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true,
+        ),
+    ) {
+        Box(Modifier.fillMaxSize().clickable(onClick = onDismiss)) {
+            // The header paints the page cover in the main window, in the same
+            // frame the toolbar strip fills, so this window only carries the
+            // list and stays transparent everywhere else.
+            // New note sits in the header gutter, left of the menu and under
+            // the explorer toggle, so it only shows while this menu is open.
+            FloatingIconButton(
+                icon = NewNoteIcon,
+                description = "New note",
+                tint = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(start = 12.dp, top = NoteActionTop)
+                    .size(44.dp),
+            ) {
+                onDismiss()
+                controller.newNote()
+            }
+            if (controller.state.settings.dailyNotes.enabled) {
+                FloatingIconButton(
+                    icon = CalendarIcon,
+                    description = "Daily note",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(start = 12.dp, top = NoteActionTop + NoteActionStep)
+                        .size(44.dp),
+                ) {
+                    onDismiss()
+                    controller.openDailyNote()
+                }
+            }
+            Column(
+                Modifier
+                    .offset(x = leftInset, y = menuOffsetY)
+                    .width(menuWidth)
+                    .heightIn(max = maxMenuHeight),
+            ) {
+                Surface(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(listHeight),
+                    shape = RoundedCornerShape(PanelCornerRadius),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    tonalElevation = 3.dp,
+                    shadowElevation = 6.dp,
+                ) {
+                    AndroidView(
+                        factory = { context -> TabListView(context) },
+                        modifier = Modifier.fillMaxWidth().fillMaxHeight(),
+                        update = { view ->
+                            view.setData(
+                                entries = tabEntries,
+                                colors = tabColors,
+                                onSelect = { index ->
+                                    // Close the menu on the tap; an unloaded tab
+                                    // shows its spinner while the body loads.
+                                    onDismiss()
+                                    controller.selectTab(index)
+                                },
+                                onClose = { index -> controller.closeTab(index) },
+                            )
+                        },
+                    )
+                }
+                // Under the whole dropdown, on the page cover, so the action
+                // reads as separate from the list of tabs it closes.
+                Spacer(Modifier.height(footerGap))
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(footerHeight),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    Text(
+                        "Close all (${state.tabs.size})",
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(
+                                enabled = state.tabs.isNotEmpty(),
+                                onClick = {
+                                    onDismiss()
+                                    controller.closeAllTabs()
+                                },
+                            )
+                            .padding(horizontal = 8.dp, vertical = 8.dp),
+                        fontSize = 12.sp,
+                        color = if (state.tabs.isNotEmpty()) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                        },
+                    )
+                }
+            }
+    }
+}
+}
+
+@Composable
+private fun ViewHeader(
+    state: EditorSlice,
+    tab: Tab,
+    controller: VibecodiumController,
+    onHideKeyboard: () -> Unit,
+) {
     val bookmarked = tab.path in state.bookmarks
     val preview = state.editorMode == EditorMode.Preview
     var menuOpen by remember { mutableStateOf(false) }
     var tabsMenuOpen by remember { mutableStateOf(false) }
+    var titleBottomPx by remember { mutableStateOf(0) }
+    val palette = LocalVibecodiumPalette.current
+    val density = LocalDensity.current
+    DisposableEffect(Unit) {
+        onDispose { controller.popupCover = false }
+    }
+    // The popups are separate windows, so the page is covered here in the main
+    // window: the toolbar strip and the rest of the page fill in the same
+    // frame, and only the menu card itself arrives on the next one.
+    val coverHeightPx = with(density) {
+        LocalConfiguration.current.screenHeightDp.dp.toPx()
+    }
+    val popupBackdrop = if (menuOpen || tabsMenuOpen) {
+        val cover = palette.overlay.compositeOver(palette.background)
+        Modifier.drawBehind {
+            // Taller than the window; the excess is clipped.
+            drawRect(color = cover, size = Size(size.width, coverHeightPx))
+        }
+    } else {
+        Modifier
+    }
     Row(
         Modifier
             .fillMaxWidth()
             .height(ViewHeaderHeight)
+            .then(popupBackdrop)
             .padding(start = 60.dp, end = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // The floating explorer button is rendered by PhoneShell at the
         // same top-left position for both empty and open states.
-        BoxWithConstraints(
+        Box(
             Modifier
                 .weight(1f)
-                .fillMaxHeight(),
+                .fillMaxHeight()
+                .onGloballyPositioned { titleBottomPx = it.boundsInWindow().bottom.roundToInt() },
         ) {
-            val titleWidth = maxWidth
             Surface(
-                onClick = { tabsMenuOpen = true },
+                onClick = {
+                    onHideKeyboard()
+                    controller.popupCover = true
+                    tabsMenuOpen = true
+                },
                 modifier = Modifier.fillMaxSize(),
                 shape = RoundedCornerShape(percent = 50),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -1252,75 +1828,16 @@ private fun ViewHeader(state: EditorSlice, tab: Tab, controller: VibecodiumContr
                     )
                 }
             }
-            // The menu follows the title button: same width, same corner
-            // radius, and a small gap underneath it.
-            DropdownMenu(
-                expanded = tabsMenuOpen,
-                onDismissRequest = { tabsMenuOpen = false },
-                modifier = Modifier.width(titleWidth),
-                offset = DpOffset(0.dp, 4.dp),
-                shape = RoundedCornerShape(22.dp),
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                tonalElevation = 3.dp,
-                shadowElevation = 4.dp,
-            ) {
-                state.tabs.forEachIndexed { index, item ->
-                    val active = index == state.activeTab
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(40.dp)
-                            .clickable {
-                                tabsMenuOpen = false
-                                controller.selectTab(index)
-                            }
-                            .padding(start = 8.dp, end = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            Icons.Default.Check,
-                            contentDescription = null,
-                            modifier = Modifier.size(15.dp),
-                            tint = if (active) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                Color.Transparent
-                            },
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            item.title + if (item.dirty) " •" else "",
-                            modifier = Modifier.weight(1f),
-                            fontSize = 13.sp,
-                            fontWeight = if (active) {
-                                FontWeight.SemiBold
-                            } else {
-                                FontWeight.Normal
-                            },
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            color = if (active) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            },
-                        )
-                        IconButton(
-                            onClick = {
-                                controller.closeTab(index)
-                                if (state.tabs.size <= 1) tabsMenuOpen = false
-                            },
-                            modifier = Modifier.size(30.dp),
-                        ) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = "Close tab",
-                                modifier = Modifier.size(15.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
+            if (tabsMenuOpen) {
+                TabsDropdown(
+                    state = state,
+                    controller = controller,
+                    anchorBottomPx = titleBottomPx,
+                    onDismiss = {
+                        tabsMenuOpen = false
+                        controller.popupCover = false
+                    },
+                )
             }
         }
         Spacer(Modifier.width(8.dp))
@@ -1341,17 +1858,24 @@ private fun ViewHeader(state: EditorSlice, tab: Tab, controller: VibecodiumContr
                     HeaderActionButton(
                         icon = Icons.Default.MoreVert,
                         description = "More options",
-                    ) { menuOpen = true }
-                    NoteActionsMenu(
+                    ) {
+                        onHideKeyboard()
+                        controller.popupCover = true
+                        menuOpen = true
+                    }
+                    HeaderNoteMenu(
                         expanded = menuOpen,
-                        onDismiss = { menuOpen = false },
+                        onDismiss = {
+                            menuOpen = false
+                            controller.popupCover = false
+                        },
                         tab = tab,
                         editorMode = state.editorMode,
                         bookmarked = bookmarked,
                         activeTab = state.activeTab,
                         controller = controller,
-                    )
-                }
+                        anchorBottomPx = titleBottomPx,
+                    )                }
             }
         }
     }
@@ -1400,6 +1924,74 @@ private fun HeaderActionButton(
     }
 }
 
+/**
+ * Toolbar "three dots" menu: dims the note, stays under the toolbar, and is
+ * only as wide as its longest row.
+ */
+@Composable
+private fun HeaderNoteMenu(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    tab: Tab,
+    editorMode: EditorMode,
+    bookmarked: Boolean,
+    activeTab: Int,
+    controller: VibecodiumController,
+    anchorBottomPx: Int,
+) {
+    if (!expanded) return
+    val density = LocalDensity.current
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val statusBarTopPx = WindowInsets.statusBars.getTop(density)
+    val navBarBottomPx = WindowInsets.navigationBars.getBottom(density)
+    val gapPx = with(density) { 4.dp.roundToPx() }
+    val menuTopScreenPx = anchorBottomPx + gapPx
+    val menuOffsetY = with(density) {
+        (menuTopScreenPx - statusBarTopPx).coerceAtLeast(0).toDp()
+    }
+    val maxMenuHeight = with(density) {
+        (screenHeight.toPx() - menuTopScreenPx - navBarBottomPx - 8.dp.toPx())
+            .coerceAtLeast(160.dp.toPx())
+            .toDp()
+    }
+    Popup(
+        popupPositionProvider = FullScreenPositionProvider,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(
+            focusable = true,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true,
+        ),
+    ) {
+        Box(Modifier.fillMaxSize().clickable(onClick = onDismiss)) {
+            // The page cover is painted by the header in the main window, so
+            // this window holds only the menu card and is transparent around it.
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(end = 12.dp, top = menuOffsetY)
+                    .width(IntrinsicSize.Max)
+                    .heightIn(max = maxMenuHeight),
+                shape = RoundedCornerShape(22.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                tonalElevation = 3.dp,
+                shadowElevation = 6.dp,
+            ) {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    NoteActionItems(
+                        tab = tab,
+                        editorMode = editorMode,
+                        bookmarked = bookmarked,
+                        activeTab = activeTab,
+                        controller = controller,
+                        onDismiss = onDismiss,
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun NoteActionsMenu(
     expanded: Boolean,
@@ -1409,60 +2001,122 @@ private fun NoteActionsMenu(
     bookmarked: Boolean,
     activeTab: Int,
     controller: VibecodiumController,
+    anchorBottomPx: Int,
 ) {
-    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
-        DropdownMenuItem(
-            text = { Text(if (editorMode == EditorMode.Source) "Reading view" else "Edit view") },
-            onClick = {
-                onDismiss()
-                controller.setEditorMode(
-                    if (editorMode == EditorMode.Source) EditorMode.Preview else EditorMode.Source,
-                )
-            },
-        )
-        DropdownMenuItem(
-            text = { Text("Save note") },
-            onClick = { onDismiss(); controller.saveActiveNow() },
-        )
-        DropdownMenuItem(
-            text = { Text("Rename note") },
-            onClick = { onDismiss(); controller.beginRename() },
-        )
-        DropdownMenuItem(
-            text = { Text(if (bookmarked) "Remove bookmark" else "Toggle bookmark") },
-            onClick = { onDismiss(); controller.toggleBookmarkActive() },
-        )
-        if (tab.language == null) {
-            DropdownMenuItem(
-                text = { Text("Outline") },
-                onClick = { onDismiss(); controller.toggleDrawer(Drawer.Right) },
+    if (!expanded) return
+    val density = LocalDensity.current
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val screenWidth = LocalConfiguration.current.screenWidthDp.dp
+    // Match the tab menu: same gutters, rounding and position below the bar.
+    val sideInset = 12.dp
+    val menuWidth = (screenWidth - sideInset * 2).coerceAtLeast(200.dp)
+    val leftInsetPx = with(density) { sideInset.roundToPx() }
+    val anchorBottom = with(density) { anchorBottomPx.toDp() }
+    val maxMenuHeight = (screenHeight - anchorBottom - 48.dp - 8.dp).coerceAtLeast(160.dp)
+    Popup(
+        popupPositionProvider = remember(density, leftInsetPx) {
+            TabMenuPositionProvider(
+                gap = with(density) { 4.dp.roundToPx() },
+                left = leftInsetPx,
             )
+        },
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(
+            focusable = true,
+            dismissOnBackPress = true,
+            dismissOnClickOutside = true,
+        ),
+    ) {
+        Surface(
+            modifier = Modifier.width(menuWidth).heightIn(max = maxMenuHeight),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 3.dp,
+            shadowElevation = 6.dp,
+        ) {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                NoteActionItems(
+                    tab = tab,
+                    editorMode = editorMode,
+                    bookmarked = bookmarked,
+                    activeTab = activeTab,
+                    controller = controller,
+                    onDismiss = onDismiss,
+                )
+            }
         }
+    }
+}
+
+/** Menu rows shared by the toolbar menu and the bottom-nav menu. */
+@Composable
+private fun NoteActionItems(
+    tab: Tab,
+    editorMode: EditorMode,
+    bookmarked: Boolean,
+    activeTab: Int,
+    controller: VibecodiumController,
+    onDismiss: () -> Unit,
+) {
+    DropdownMenuItem(
+        text = { Text(if (editorMode == EditorMode.Source) "Reading view" else "Edit view") },
+        onClick = {
+            onDismiss()
+            controller.setEditorMode(
+                if (editorMode == EditorMode.Source) EditorMode.Preview else EditorMode.Source,
+            )
+        },
+    )
+    DropdownMenuItem(
+        text = { Text("Find and replace") },
+        onClick = { onDismiss(); controller.openFindBar() },
+    )
+    DropdownMenuItem(
+        text = { Text("Save note") },
+        onClick = { onDismiss(); controller.saveActiveNow() },
+    )
+    DropdownMenuItem(
+        text = { Text("Rename note") },
+        onClick = { onDismiss(); controller.beginRename() },
+    )
+    DropdownMenuItem(
+        text = { Text(if (bookmarked) "Remove bookmark" else "Toggle bookmark") },
+        onClick = { onDismiss(); controller.toggleBookmarkActive() },
+    )
+    if (tab.language == null) {
         DropdownMenuItem(
-            text = { Text("Sync") },
-            onClick = { onDismiss(); controller.openSettings("Sync") },
+            text = { Text("Outline") },
+            onClick = { onDismiss(); controller.toggleDrawer(Drawer.Right) },
         )
         DropdownMenuItem(
-            text = { Text("Close tab") },
-            onClick = { onDismiss(); controller.closeTab(activeTab) },
-        )
-        DropdownMenuItem(
-            text = { Text("Delete note") },
-            onClick = { onDismiss(); controller.confirmDeleteActive() },
-        )
-        HorizontalDivider()
-        DropdownMenuItem(
-            text = { Text("Open another vault") },
-            onClick = { onDismiss(); controller.openVaultChooser() },
-        )
-        DropdownMenuItem(
-            text = { Text("About") },
-            onClick = {
-                onDismiss()
-                controller.showMessage("vibecodium · Rust core 0.1.0")
-            },
+            text = { Text("Table source / grid") },
+            onClick = { onDismiss(); controller.toggleActiveTableSource() },
         )
     }
+    DropdownMenuItem(
+        text = { Text("Sync") },
+        onClick = { onDismiss(); controller.openSettings("Sync") },
+    )
+    DropdownMenuItem(
+        text = { Text("Close tab") },
+        onClick = { onDismiss(); controller.closeTab(activeTab) },
+    )
+    DropdownMenuItem(
+        text = { Text("Delete note") },
+        onClick = { onDismiss(); controller.confirmDeleteActive() },
+    )
+    HorizontalDivider()
+    DropdownMenuItem(
+        text = { Text("Open another vault") },
+        onClick = { onDismiss(); controller.openVaultChooser() },
+    )
+    DropdownMenuItem(
+        text = { Text("About") },
+        onClick = {
+            onDismiss()
+            controller.showMessage("Vibecodium · Rust core 0.1.0")
+        },
+    )
 }
 
 // --------------------------------------------------------------------- source
@@ -1472,12 +2126,19 @@ private fun SourceEditor(
     state: EditorSlice,
     controller: VibecodiumController,
     tab: Tab,
+    editorFontDp: Int,
+    codeFontDp: Int,
+    textFontFace: EditorFontFace,
+    codeFontFace: EditorFontFace,
+    headings: HeadingsSettings,
     topInsetPx: Float,
     bottomInsetPx: Float,
     preview: Boolean,
     onScroll: (Float, Float, Boolean) -> Unit,
     onViewReady: (NativeEditorView) -> Unit,
     onCaretPlaced: () -> Unit,
+    highlightCurrentLine: Boolean,
+    highlightWrappedLineInGutter: Boolean,
 ) {
     AndroidView(
         factory = { context ->
@@ -1487,15 +2148,29 @@ private fun SourceEditor(
                     controller.updateNativeEditor(text, selection)
                 },
                 idleBottomInsetPx = bottomInsetPx,
-            ).also(onViewReady)
+            ).also { view ->
+                controller.attachEditorView(view)
+                view.setOnTabFrameShown { shownPath -> controller.onTabFrameShown(shownPath) }
+                view.setOnHistoryChanged { canUndo, canRedo ->
+                    controller.setEditorHistoryState(canUndo, canRedo)
+                }
+                onViewReady(view)
+            }
         },
         modifier = Modifier.fillMaxSize(),
+        onRelease = { controller.attachEditorView(null) },
         update = { view ->
             view.setTopInset(topInsetPx)
             view.setBottomInset(bottomInsetPx)
             view.setOnScrollChanged(onScroll)
             view.setOnCaretPlaced(onCaretPlaced)
             view.setEditorPreview(preview)
+            view.setEditorFont(editorFontDp, AppSettingsJson.editorLineDp(editorFontDp))
+            view.setEditorCodeFont(codeFontDp)
+            view.setEditorFonts(textFontFace, codeFontFace)
+            view.setEditorHeadings(headings)
+            view.setEditorCurrentLineHighlight(highlightCurrentLine)
+            view.setEditorGutterWrappedLineHighlight(highlightWrappedLineInGutter)
             view.setEditor(tab.text, tab.selection, tab.language, tab.path)
         },
     )
@@ -1712,7 +2387,7 @@ private fun annotatedFromSpans(
                 "strikethrough" -> SpanStyle(textDecoration = TextDecoration.LineThrough)
                 "link" -> SpanStyle(color = accent, textDecoration = TextDecoration.Underline)
                 "underline" -> SpanStyle(textDecoration = TextDecoration.Underline)
-                "highlight" -> SpanStyle(background = Color(0x33A882FF))
+                "highlight" -> SpanStyle(background = accent.copy(alpha = 0.20f))
                 "tag" -> SpanStyle(color = accent)
                 "grammar" -> SpanStyle(fontStyle = FontStyle.Italic)
                 else -> null
@@ -1930,29 +2605,23 @@ private fun MobileNavbar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             NavButton(
-                icon = Icons.Default.ArrowBack,
-                label = "Back",
-                enabled = state.historyIndex > 0,
-            ) { controller.back() }
+                icon = UndoIcon,
+                label = "Undo",
+                enabled = state.editorCanUndo,
+            ) { controller.undoEditor() }
             NavButton(
-                icon = Icons.Default.ArrowForward,
-                label = "Forward",
-                enabled = state.historyIndex in 0 until state.history.lastIndex,
-            ) { controller.forward() }
+                icon = RedoIcon,
+                label = "Redo",
+                enabled = state.editorCanRedo,
+            ) { controller.redoEditor() }
             NavButton(
                 icon = Icons.Default.Search,
-                label = "Search",
-            ) { controller.setDrawerMode(DrawerMode.Search) }
+                label = "Find in note",
+            ) { controller.openFindBar() }
             NavButton(
                 icon = Icons.Default.Add,
                 label = "New note",
             ) { controller.newNote() }
-            NavButton(
-                icon = Icons.Default.List,
-                label = "Tabs",
-                active = state.tabSwitcher,
-                badge = state.tabs.size,
-            ) { controller.toggleTabSwitcher() }
 
             Box(
                 Modifier
@@ -1975,6 +2644,7 @@ private fun MobileNavbar(
                     bookmarked = tab.path.isNotEmpty() && tab.path in state.bookmarks,
                     activeTab = state.activeTab,
                     controller = controller,
+                    anchorBottomPx = 0,
                 )
             }
         }
@@ -2040,12 +2710,28 @@ private fun RowScope.ModeTab(
 }
 
 @Composable
-private fun BoxScope.DrawerBackdrop(onDismiss: () -> Unit) {
+private fun BoxScope.DrawerBackdrop(alpha: Float = 0.5f, onDismiss: () -> Unit) {
+    val palette = LocalVibecodiumPalette.current
+    // Keep the theme's cover colour but flatten its own alpha over the theme
+    // background. The left drawer then paints an opaque, theme-tinted sheet
+    // that hides text/buttons behind it instead of becoming pure black.
+    val cover = palette.overlay.compositeOver(palette.background)
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.5f))
+            .background(cover.copy(alpha = alpha.coerceIn(0f, 1f)))
             .clickable(onClick = onDismiss),
+    )
+}
+
+private fun Color.compositeOver(background: Color): Color {
+    val a = alpha
+    if (a >= 0.999f) return this
+    return Color(
+        red = red * a + background.red * (1f - a),
+        green = green * a + background.green * (1f - a),
+        blue = blue * a + background.blue * (1f - a),
+        alpha = 1f,
     )
 }
 
@@ -2211,11 +2897,153 @@ private fun VaultChooserRow(
     }
 }
 
+/**
+ * Keyboard height the drawer reserves while the inline rename field is open,
+ * measured above the navigation bar the shell already keeps clear.
+ *
+ * The IME inset is animated over many frames. Padding the drawer with the
+ * animated value resized (and re-rendered) the native tree surface on every
+ * one of them, which read as the list squeezing and stretching while the
+ * keyboard slid in or out. Only the settled height is published, once the
+ * show animation stops moving; it is dropped as soon as the keyboard starts
+ * to hide. Both changes then land underneath the keyboard, where they cannot
+ * be seen, and the tree resizes once instead of once per animation frame.
+ */
 @Composable
-private fun LeftDrawer(state: UiState, controller: VibecodiumController, modifier: Modifier) {
+private fun renameImeBottomPx(active: Boolean): Int {
+    val density = LocalDensity.current
+    val navigationBottomPx = WindowInsets.navigationBars.getBottom(density)
+    // The IME insets object lives in the composition; sampling its animated
+    // value from the loop below keeps the drawer from recomposing per frame.
+    val ime = WindowInsets.ime
+    var settled by remember { mutableStateOf(0) }
+    LaunchedEffect(active, navigationBottomPx) {
+        if (!active) {
+            settled = 0
+            return@LaunchedEffect
+        }
+        var previous = 0
+        var stableFrames = 0
+        while (true) {
+            val bottom = ime.getBottom(density)
+            stableFrames = if (bottom == previous) stableFrames + 1 else 0
+            when {
+                // Gone or already sliding away: release the space now, while
+                // the keyboard still covers the bottom of the tree.
+                bottom == 0 || bottom < previous -> if (settled != 0) settled = 0
+                // Shrink only after the show animation settles.
+                stableFrames >= 2 -> if (settled != bottom) settled = bottom
+            }
+            previous = bottom
+            withFrameNanos { }
+        }
+    }
+    return (settled - navigationBottomPx).coerceAtLeast(0)
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun LeftDrawer(
+    state: UiState,
+    controller: VibecodiumController,
+    renameActive: Boolean,
+    modifier: Modifier,
+) {
     val focusManager = LocalFocusManager.current
-    Surface(modifier = modifier, color = Color(0xFF282828), tonalElevation = 0.dp) {
-        Column(Modifier.fillMaxSize()) {
+    val density = LocalDensity.current
+    val palette = LocalVibecodiumPalette.current
+    // While the inline rename field is open its row is lifted above the
+    // keyboard by shrinking the tree area. The shell already keeps the drawer
+    // above the navigation bar, so only the space above it is reserved.
+    val imeBottomPx = renameImeBottomPx(renameActive)
+    val contentBottom = with(density) { imeBottomPx.toDp() }
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(topEnd = PanelCornerRadius, bottomEnd = PanelCornerRadius),
+        color = palette.surfaceAlt,
+        tonalElevation = 0.dp,
+    ) {
+        Column(Modifier.fillMaxSize().padding(bottom = contentBottom)) {
+            // The bar is toolbar height, but the tiles stay inset from its
+            // edges so their rounded highlight never touches the dividers.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .height(DrawerTopBarHeight)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                for (mode in DrawerMode.entries) {
+                    val active = state.drawerMode == mode
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(
+                                if (active) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
+                                } else {
+                                    Color.Transparent
+                                },
+                            )
+                            .clickable {
+                                focusManager.clearFocus()
+                                controller.setDrawerMode(mode)
+                            },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            drawerModeIcon(mode),
+                            contentDescription = drawerModeLabel(mode),
+                            modifier = Modifier.size(26.dp),
+                            tint = if (active) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                }
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                // Keep the native tree composed while another section is open.
+                // Recreating its SurfaceView on every tab switch tore the
+                // surface down and flashed the editor through the drawer.
+                val overlayMode = state.drawerMode != DrawerMode.Files
+                Box(
+                    Modifier
+                        .fillMaxSize()
+                        .then(
+                            if (overlayMode) {
+                                Modifier.semantics { invisibleToUser() }
+                            } else {
+                                Modifier
+                            },
+                        ),
+                ) {
+                    TreeList(state, controller)
+                }
+                if (overlayMode) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = palette.surfaceAlt,
+                        tonalElevation = 0.dp,
+                    ) {
+                        when (state.drawerMode) {
+                            DrawerMode.Search -> SearchPanel(state, controller)
+                            DrawerMode.Bookmarks -> key(state.bookmarks, state.notes) {
+                                BookmarkedList(state, controller)
+                            }
+                            DrawerMode.Recent -> key(state.recentFiles, state.notes) {
+                                RecentList(state, controller)
+                            }
+                            DrawerMode.Files -> Unit
+                        }
+                    }
+                }
+            }
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -2256,111 +3084,7 @@ private fun LeftDrawer(state: UiState, controller: VibecodiumController, modifie
                         )
                     }
                 }
-                IconButton(
-                    onClick = {
-                        focusManager.clearFocus()
-                        controller.openSettings()
-                    },
-                    modifier = Modifier.size(44.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Settings,
-                        contentDescription = "Settings",
-                        modifier = Modifier.size(24.dp),
-                    )
-                }
-                IconButton(
-                    onClick = {
-                        focusManager.clearFocus()
-                        controller.closeOverlays()
-                    },
-                    modifier = Modifier.size(44.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = "Close",
-                        modifier = Modifier.size(24.dp),
-                    )
-                }
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                // Keep the native tree composed while another section is open.
-                // Recreating its SurfaceView on every tab switch tore the
-                // surface down and flashed the editor through the drawer.
-                val overlayMode = state.drawerMode != DrawerMode.Files
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .then(
-                            if (overlayMode) {
-                                Modifier.semantics { invisibleToUser() }
-                            } else {
-                                Modifier
-                            },
-                        ),
-                ) {
-                    TreeList(state, controller)
-                }
-                if (overlayMode) {
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = Color(0xFF282828),
-                        tonalElevation = 0.dp,
-                    ) {
-                        when (state.drawerMode) {
-                            DrawerMode.Search -> SearchPanel(state, controller)
-                            DrawerMode.Bookmarks -> key(state.bookmarks, state.notes) {
-                                BookmarkedList(state, controller)
-                            }
-                            DrawerMode.Recent -> key(state.recentFiles, state.notes) {
-                                RecentList(state, controller)
-                            }
-                            DrawerMode.Files -> Unit
-                        }
-                    }
-                }
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                for (mode in DrawerMode.entries) {
-                    val active = state.drawerMode == mode
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(
-                                if (active) {
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-                                } else {
-                                    Color.Transparent
-                                },
-                            )
-                            .clickable {
-                                focusManager.clearFocus()
-                                controller.setDrawerMode(mode)
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            drawerModeIcon(mode),
-                            contentDescription = drawerModeLabel(mode),
-                            modifier = Modifier.size(26.dp),
-                            tint = if (active) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
-                    }
-                }
+                DrawerSyncButton(state, controller)
             }
         }
     }
@@ -2382,7 +3106,12 @@ private fun drawerModeIcon(mode: DrawerMode): ImageVector = when (mode) {
 
 @Composable
 private fun RightDrawer(state: UiState, controller: VibecodiumController, modifier: Modifier) {
-    Surface(modifier = modifier, color = MaterialTheme.colorScheme.surface, tonalElevation = 8.dp) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(topStart = PanelCornerRadius, bottomStart = PanelCornerRadius),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 8.dp,
+    ) {
         Column(Modifier.fillMaxSize()) {
             Row(
                 Modifier
@@ -2416,6 +3145,8 @@ private fun RightDrawer(state: UiState, controller: VibecodiumController, modifi
                             heading.text,
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .clickable { controller.revealHeading(heading) }
                                 .padding(
                                     start = ((heading.level - 1) * 12).dp + 12.dp,
                                     end = 12.dp,
@@ -2443,95 +3174,11 @@ private fun RightDrawer(state: UiState, controller: VibecodiumController, modifi
 }
 
 @Composable
-private fun TabSwitcher(state: UiState, controller: VibecodiumController, modifier: Modifier) {
-    Surface(modifier = modifier, color = MaterialTheme.colorScheme.background) {
-        Column(Modifier.fillMaxSize()) {
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .height(52.dp)
-                    .padding(start = 14.dp, end = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "Tabs (${state.tabs.size})",
-                    modifier = Modifier.weight(1f),
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                IconButton(onClick = { controller.newNote() }) {
-                    Icon(Icons.Default.Add, contentDescription = "New note", modifier = Modifier.size(20.dp))
-                }
-                IconButton(onClick = { controller.toggleTabSwitcher() }) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", modifier = Modifier.size(20.dp))
-                }
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
-            LazyColumn(Modifier.fillMaxSize().padding(8.dp)) {
-                itemsIndexed(state.tabs) { index, tab ->
-                    val active = index == state.activeTab
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(
-                                if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                                else Color.Transparent,
-                                RoundedCornerShape(8.dp),
-                            )
-                            .clickable { controller.selectTab(index) }
-                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                tab.title + if (tab.dirty) " •" else "",
-                                fontSize = 14.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                tab.path,
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        if (tab.path in state.bookmarks) {
-                            Icon(
-                                Icons.Default.Star,
-                                contentDescription = "Bookmarked",
-                                modifier = Modifier.size(14.dp),
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                        if (active) {
-                            Icon(
-                                Icons.Default.Check,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = MaterialTheme.colorScheme.primary,
-                            )
-                        }
-                        IconButton(onClick = { controller.closeTab(index) }) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = "Close tab",
-                                modifier = Modifier.size(16.dp),
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
 private fun TreeList(state: UiState, controller: VibecodiumController) {
     var filterFocused by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
+    val palette = LocalVibecodiumPalette.current
     Column(Modifier.fillMaxSize()) {
         Box(
             Modifier.pointerInput(Unit) {
@@ -2559,14 +3206,14 @@ private fun TreeList(state: UiState, controller: VibecodiumController) {
                     .height(36.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(
-                        if (filterFocused) Color(0xFF1B1B1B) else Color(0xFF222222),
+                        if (filterFocused) palette.backgroundAlt else palette.surface,
                     )
                     .border(
                         width = if (filterFocused) 1.5.dp else 1.dp,
                         color = if (filterFocused) {
                             MaterialTheme.colorScheme.primary
                         } else {
-                            Color(0xFF383838)
+                            palette.outline
                         },
                         shape = RoundedCornerShape(8.dp),
                     )
@@ -2609,7 +3256,7 @@ private fun TreeList(state: UiState, controller: VibecodiumController) {
                                 Text(
                                     "Quick filter...",
                                     fontSize = 14.sp,
-                                    color = Color(0xFF8A8A8A),
+                                    color = palette.textMuted,
                                 )
                             }
                             innerTextField()
@@ -2639,35 +3286,66 @@ private fun TreeList(state: UiState, controller: VibecodiumController) {
         val filtered = remember(state.explorerTree, state.fileQuery) {
             filterExplorerTree(state.explorerTree, state.fileQuery)
         }
-        val collapsed = if (state.fileQuery.isBlank()) state.collapsedFolders else emptySet()
+        val filterActive = state.fileQuery.isNotBlank()
+        // Folders on the way to a matching file open automatically; the user
+        // can still collapse them for this filter pass.
+        val matchAncestors = remember(state.explorerTree, state.fileQuery) {
+            filteredAncestorsForQuery(state.explorerTree, state.fileQuery)
+        }
+        var filterOverrides by remember(state.fileQuery) {
+            mutableStateOf<Map<String, Boolean>>(emptyMap())
+        }
+        val collapsed = remember(state.collapsedFolders, matchAncestors, filterOverrides, filterActive) {
+            if (!filterActive) {
+                state.collapsedFolders
+            } else {
+                val result = (state.collapsedFolders - matchAncestors).toMutableSet()
+                for ((path, expanded) in filterOverrides) {
+                    if (expanded) result.remove(path) else result.add(path)
+                }
+                result
+            }
+        }
         val rows = remember(filtered, collapsed) {
             flattenExplorerTree(filtered, collapsed)
         }
+        val toggle: (String) -> Unit = { path ->
+            if (!filterActive) {
+                controller.toggleFolder(path)
+            } else {
+                // false = collapsed, true = expanded for this filter pass.
+                val currentlyCollapsed = path in collapsed
+                filterOverrides = filterOverrides + (path to currentlyCollapsed)
+            }
+        }
+        val toggleState = rememberUpdatedState(toggle)
         if (rows.isEmpty()) {
             Placeholder("No matching files.")
             return@Column
         }
         val activePath = state.tabs.getOrNull(state.activeTab)?.path
-        val treeJson = remember(rows, activePath, state.collapsedFolders) {
+        val treeJson = remember(rows, activePath, collapsed, state.fileQuery) {
+            val query = state.fileQuery.trim()
             val array = JSONArray()
             for (row in rows) {
+                val displayName = explorerDisplayName(row.node)
+                val matchIndex = if (query.isEmpty()) {
+                    -1
+                } else {
+                    displayName.indexOf(query, ignoreCase = true)
+                }
                 array.put(
                     JSONObject()
-                        .put(
-                            "name",
-                            if (row.node.isFolder) {
-                                row.node.name
-                            } else {
-                                row.node.name.substringBeforeLast('.', row.node.name)
-                            },
-                        )
+                        .put("name", displayName)
                         .put("path", row.node.path)
                         .put("folder", row.node.isFolder)
                         .put("depth", row.depth)
-                        .put("expanded", row.node.path !in state.collapsedFolders)
+                        .put("expanded", row.node.path !in collapsed)
                         .put("has_children", row.node.children.isNotEmpty())
                         .put("note", row.node.entry?.isNote == true)
-                        .put("extension", row.node.entry?.extension.orEmpty()),
+                        .put("extension", row.node.entry?.extension.orEmpty())
+                        .put("match_start", if (matchIndex >= 0) displayName.codePointCount(0, matchIndex) else 0)
+                        .put("match_len", if (matchIndex >= 0) query.codePointCount(0, query.length) else 0),
                 )
             }
             JSONObject()
@@ -2700,7 +3378,9 @@ private fun TreeList(state: UiState, controller: VibecodiumController) {
                 factory = { context ->
                     NativeTreeView(
                         context,
-                        onAction = { action -> handleTreeAction(action, controller) },
+                        onAction = { action ->
+                            handleTreeAction(action, controller) { path -> toggleState.value(path) }
+                        },
                         onTouchStart = { if (!renamingNow) focusManager.clearFocus() },
                         onPress = { path -> pressedPath.value = path },
                     ).also { treeView = it }
@@ -2712,6 +3392,20 @@ private fun TreeList(state: UiState, controller: VibecodiumController) {
                     it.setInteractive(state.drawerMode == DrawerMode.Files)
                     it.setRenaming(renameRow != null)
                 },
+            )
+            // Rows dissolve into the drawer surface at the bottom edge, where
+            // the tree meets the vault footer without a divider.
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(TreeEdgeFade)
+                    .background(
+                        Brush.verticalGradient(
+                            0f to palette.surfaceAlt.copy(alpha = 0f),
+                            1f to palette.surfaceAlt,
+                        ),
+                    ),
             )
             val pressed = pressedPath.value
             val pressedIndex = pressed?.let { path -> rows.indexOfFirst { it.node.path == path } } ?: -1
@@ -2763,6 +3457,7 @@ private fun BoxScope.TreeInlineRename(
     if (rowIndex < 0) return
     val depth = rows[rowIndex].depth
     val density = LocalDensity.current
+    val palette = LocalVibecodiumPalette.current
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     val initialSelection = remember(path) {
@@ -2825,7 +3520,7 @@ private fun BoxScope.TreeInlineRename(
             .fillMaxWidth()
             .height(rowHeight)
             .clip(shape)
-            .background(Color(0xFF1B1B1B))
+            .background(palette.backgroundAlt)
             .border(1.5.dp, MaterialTheme.colorScheme.primary, shape)
             .padding(horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -2842,7 +3537,7 @@ private fun BoxScope.TreeInlineRename(
             singleLine = true,
             textStyle = TextStyle(
                 fontSize = with(density) { 17.dp.toSp() },
-                color = Color(0xFFDADADA),
+                color = palette.text,
             ),
             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
@@ -2851,7 +3546,11 @@ private fun BoxScope.TreeInlineRename(
     }
 }
 
-private fun handleTreeAction(action: String, controller: VibecodiumController) {
+private fun handleTreeAction(
+    action: String,
+    controller: VibecodiumController,
+    onToggle: (String) -> Unit = { controller.toggleFolder(it) },
+) {
     val value = runCatching { JSONObject(action) }.getOrNull() ?: return
     val kind = value.optString("kind")
     if (kind == "commit_rename") {
@@ -2861,10 +3560,10 @@ private fun handleTreeAction(action: String, controller: VibecodiumController) {
     val path = value.optString("path")
     if (path.isEmpty()) return
     when (kind) {
-        "toggle" -> controller.toggleFolder(path)
+        "toggle" -> onToggle(path)
         "open_note" -> {
+            // The drawer closes from openNote() once the note is loaded.
             controller.openNote(path)
-            controller.closeOverlays()
         }
         "open_file" -> controller.openAttachment(path)
         "rename" -> controller.beginExplorerRename(path, controller.state.folders.contains(path))
@@ -2877,26 +3576,6 @@ private fun handleTreeAction(action: String, controller: VibecodiumController) {
 private fun ExplorerToolbar(state: UiState, controller: VibecodiumController) {
     val allCollapsed = state.folders.isNotEmpty() &&
         state.folders.all { it in state.collapsedFolders }
-    val syncLabel = when {
-        state.sync.busy -> "Stop sync"
-        state.sync.connected && !state.vaultSync.paused -> "Sync"
-        else -> "Refresh files"
-    }
-    val syncAngle = if (state.sync.busy) {
-        val transition = rememberInfiniteTransition(label = "sync-rotation")
-        val angle by transition.animateFloat(
-            initialValue = 0f,
-            targetValue = 360f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(900, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart,
-            ),
-            label = "sync-angle",
-        )
-        angle
-    } else {
-        0f
-    }
     Row(
         Modifier
             .fillMaxWidth()
@@ -2928,14 +3607,47 @@ private fun ExplorerToolbar(state: UiState, controller: VibecodiumController) {
             enabled = state.folders.isNotEmpty(),
             modifier = Modifier.weight(1f).fillMaxHeight(),
         ) { controller.toggleAllFolders() }
-        CompactToolbarButton(
+    }
+}
+
+/**
+ * Drawer footer sync action: syncs while connected, spins while running and
+ * falls back to a plain refresh. Sized like the settings button beside it.
+ */
+@Composable
+private fun DrawerSyncButton(state: UiState, controller: VibecodiumController) {
+    val label = when {
+        state.sync.busy -> "Stop sync"
+        state.sync.connected && !state.vaultSync.paused -> "Sync"
+        else -> "Refresh files"
+    }
+    val angle = if (state.sync.busy) {
+        val transition = rememberInfiniteTransition(label = "sync-rotation")
+        val spinning by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(900, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "sync-angle",
+        )
+        spinning
+    } else {
+        0f
+    }
+    IconButton(
+        onClick = { controller.refreshOrSync() },
+        modifier = Modifier.size(44.dp),
+    ) {
+        Icon(
             SyncArrowsIcon,
-            syncLabel,
-            rotation = syncAngle,
-            modifier = Modifier.weight(1f).fillMaxHeight(),
-        ) {
-            controller.refreshOrSync()
-        }
+            contentDescription = label,
+            modifier = Modifier
+                .size(24.dp)
+                .graphicsLayer { rotationZ = angle },
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -2945,7 +3657,6 @@ private fun CompactToolbarButton(
     description: String,
     enabled: Boolean = true,
     tint: Color = MaterialTheme.colorScheme.onSurfaceVariant,
-    rotation: Float = 0f,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
@@ -2953,9 +3664,7 @@ private fun CompactToolbarButton(
         Icon(
             icon,
             contentDescription = description,
-            modifier = Modifier
-                .size(26.dp)
-                .graphicsLayer { rotationZ = rotation },
+            modifier = Modifier.size(26.dp),
             tint = if (enabled) tint else tint.copy(alpha = 0.35f),
         )
     }
@@ -2968,31 +3677,32 @@ private fun BookmarkedList(state: UiState, controller: VibecodiumController) {
         Placeholder("No bookmarked notes yet.\nUse the star in the note header.")
         return
     }
-    val listState = rememberLazyListState()
-    Box(Modifier.fillMaxSize()) {
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-            items(notes, key = { it.path }) { note ->
-                NoteRow(
-                    note,
-                    active = state.tabs.getOrNull(state.activeTab)?.path == note.path,
-                    bookmarked = true,
-                    detail = note.path,
-                ) {
-                    controller.openNote(note.path)
-                    controller.closeOverlays()
-                }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
-            }
+    val activePath = state.tabs.getOrNull(state.activeTab)?.path
+    val entries = remember(notes, activePath) {
+        notes.map { note ->
+            NoteListEntry(
+                path = note.path,
+                title = note.basename,
+                detail = note.path,
+                active = note.path == activePath,
+                bookmarked = true,
+            )
         }
-        ThinScrollbar(
-            listState,
-            Modifier
-                .align(Alignment.CenterEnd)
-                .fillMaxHeight()
-                .padding(end = 2.dp)
-                .width(3.dp),
-        )
     }
+    val colors = NoteListColors(
+        activeBackground = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f).toArgb(),
+        text = MaterialTheme.colorScheme.onSurface.toArgb(),
+        muted = MaterialTheme.colorScheme.onSurfaceVariant.toArgb(),
+        accent = MaterialTheme.colorScheme.primary.toArgb(),
+        divider = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f).toArgb(),
+    )
+    AndroidView(
+        factory = { context -> NoteListView(context) },
+        modifier = Modifier.fillMaxSize(),
+        update = { view ->
+            view.setData(entries, colors, onOpen = { path -> controller.openNote(path) })
+        },
+    )
 }
 
 @Composable
@@ -3005,7 +3715,25 @@ private fun RecentList(state: UiState, controller: VibecodiumController) {
         Placeholder("Notes you open will appear here.")
         return
     }
-    val listState = rememberLazyListState()
+    val entries = remember(recent, state.bookmarks) {
+        recent.map { (note, openedAt) ->
+            NoteListEntry(
+                path = note.path,
+                title = note.basename,
+                detail = if (openedAt > 0) dateTimeLabel(openedAt) else "—",
+                active = false,
+                bookmarked = note.path in state.bookmarks,
+                closable = true,
+            )
+        }
+    }
+    val colors = NoteListColors(
+        activeBackground = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f).toArgb(),
+        text = MaterialTheme.colorScheme.onSurface.toArgb(),
+        muted = MaterialTheme.colorScheme.onSurfaceVariant.toArgb(),
+        accent = MaterialTheme.colorScheme.primary.toArgb(),
+        divider = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f).toArgb(),
+    )
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier
@@ -3026,29 +3754,18 @@ private fun RecentList(state: UiState, controller: VibecodiumController) {
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-                items(recent, key = { it.first.path }) { (note, openedAt) ->
-                    NoteRow(
-                        note,
-                        active = false,
-                        bookmarked = note.path in state.bookmarks,
-                        detail = if (openedAt > 0) dateTimeLabel(openedAt) else "—",
-                    ) {
-                        controller.openNote(note.path)
-                        controller.closeOverlays()
-                    }
-                }
-            }
-            ThinScrollbar(
-                listState,
-                Modifier
-                    .align(Alignment.CenterEnd)
-                    .fillMaxHeight()
-                    .padding(end = 2.dp)
-                    .width(3.dp),
-            )
-        }
+        AndroidView(
+            factory = { context -> NoteListView(context) },
+            modifier = Modifier.fillMaxWidth().weight(1f),
+            update = { view ->
+                view.setData(
+                    entries,
+                    colors,
+                    onOpen = { path -> controller.openNote(path) },
+                    onClose = { path -> controller.removeRecent(path) },
+                )
+            },
+        )
     }
 }
 
@@ -3058,17 +3775,28 @@ private fun ThinScrollbar(state: LazyListState, modifier: Modifier = Modifier) {
     val total = layout.totalItemsCount
     val visible = layout.visibleItemsInfo
     if (total <= 0 || visible.isEmpty() || total <= visible.size) return
-    // Median row height keeps the track scale stable while rows recycle.
-    // Deriving it from visible.size instead makes the thumb shift a notch
-    // every time a partially visible row enters or leaves the viewport.
-    val sizes = visible.map { it.size }.sorted()
-    val itemSize = sizes[sizes.size / 2].coerceAtLeast(1).toFloat()
+    // Rows are not uniform (file headers are taller than match lines), so a
+    // median height makes the thumb jump whenever a header enters or leaves.
+    // Average over the visible rows changes gradually; animating the result
+    // keeps the track from stepping while the list is scrolling.
+    val averageSize = visible.map { it.size }.average().toFloat().coerceAtLeast(1f)
+    val firstSize = visible.first().size.coerceAtLeast(1).toFloat()
     val viewport = (layout.viewportEndOffset - layout.viewportStartOffset).toFloat()
-    val content = itemSize * total
-    val maxScroll = (content - viewport).coerceAtLeast(1f)
-    val scrolled = state.firstVisibleItemIndex * itemSize + state.firstVisibleItemScrollOffset
-    val progress = (scrolled / maxScroll).coerceIn(0f, 1f)
-    val fraction = (viewport / content).coerceIn(0.08f, 1f)
+    val targetProgress = (
+        (state.firstVisibleItemIndex + (state.firstVisibleItemScrollOffset / firstSize).coerceIn(0f, 1f)) /
+            (total - 1).coerceAtLeast(1).toFloat()
+        ).coerceIn(0f, 1f)
+    val targetFraction = (viewport / (averageSize * total)).coerceIn(0.08f, 1f)
+    val progress by animateFloatAsState(
+        targetValue = targetProgress,
+        animationSpec = tween(90),
+        label = "scrollbar-progress",
+    )
+    val fraction by animateFloatAsState(
+        targetValue = targetFraction,
+        animationSpec = tween(120),
+        label = "scrollbar-fraction",
+    )
     BoxWithConstraints(modifier) {
         val thumbHeight = (maxHeight * fraction).coerceAtLeast(24.dp)
         val top = (maxHeight - thumbHeight) * progress
@@ -3079,7 +3807,7 @@ private fun ThinScrollbar(state: LazyListState, modifier: Modifier = Modifier) {
                 .height(thumbHeight)
                 .background(
                     MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
-                    RoundedCornerShape(2.dp),
+                    RoundedCornerShape(1.5.dp),
                 ),
         )
     }
@@ -3144,6 +3872,12 @@ private fun NoteRow(
 private fun SearchPanel(state: UiState, controller: VibecodiumController) {
     var queryFocused by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
+    val palette = LocalVibecodiumPalette.current
+    val results = state.searchResults
+    val collapsed = state.searchCollapsedPaths
+    val collapsible = results.filter { it.matches.isNotEmpty() }
+    val allCollapsed = collapsible.isNotEmpty() && collapsible.all { it.path in collapsed }
+    val totalMatches = results.sumOf { it.matchCount }
     Column(Modifier.fillMaxSize()) {
         // Same field as the explorer's quick filter (`TreeList`): 36 dp tall,
         // 8 dp corners, #222222 on #383838, primary accent while focused.
@@ -3158,14 +3892,14 @@ private fun SearchPanel(state: UiState, controller: VibecodiumController) {
                     .height(36.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(
-                        if (queryFocused) Color(0xFF1B1B1B) else Color(0xFF222222),
+                        if (queryFocused) palette.backgroundAlt else palette.surface,
                     )
                     .border(
                         width = if (queryFocused) 1.5.dp else 1.dp,
                         color = if (queryFocused) {
                             MaterialTheme.colorScheme.primary
                         } else {
-                            Color(0xFF383838)
+                            palette.outline
                         },
                         shape = RoundedCornerShape(8.dp),
                     )
@@ -3208,7 +3942,7 @@ private fun SearchPanel(state: UiState, controller: VibecodiumController) {
                                 Text(
                                     "Search notes...",
                                     fontSize = 14.sp,
-                                    color = Color(0xFF8A8A8A),
+                                    color = palette.textMuted,
                                 )
                             }
                             innerTextField()
@@ -3230,7 +3964,42 @@ private fun SearchPanel(state: UiState, controller: VibecodiumController) {
                 }
             }
         }
+        if (results.isNotEmpty()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "${results.size} files · $totalMatches matches",
+                    modifier = Modifier.weight(1f),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                CompactToolbarButton(
+                    CollapseAllIcon,
+                    if (allCollapsed) "Expand all" else "Collapse all",
+                    enabled = collapsible.isNotEmpty(),
+                    modifier = Modifier.size(32.dp),
+                ) { controller.setAllSearchCollapsed(!allCollapsed) }
+            }
+        }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+        val resultColors = SearchResultColors(
+            headerBackground = palette.surfaceAlt.copy(alpha = 0.55f).toArgb(),
+            text = MaterialTheme.colorScheme.onSurface.toArgb(),
+            muted = MaterialTheme.colorScheme.onSurfaceVariant.toArgb(),
+            error = MaterialTheme.colorScheme.error.toArgb(),
+            accent = MaterialTheme.colorScheme.primary.toArgb(),
+            outline = MaterialTheme.colorScheme.outline.toArgb(),
+            surface = palette.surface.toArgb(),
+            divider = MaterialTheme.colorScheme.outline.copy(alpha = 0.8f).toArgb(),
+            highlight = MaterialTheme.colorScheme.primary.copy(alpha = 0.20f).toArgb(),
+            matchedText = MaterialTheme.colorScheme.onSurface.toArgb(),
+        )
         when {
             state.searchQuery.isBlank() -> Text(
                 "Type to search file names and note content.",
@@ -3239,45 +4008,282 @@ private fun SearchPanel(state: UiState, controller: VibecodiumController) {
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             )
 
-            state.searchHits.isEmpty() -> Text(
+            results.isEmpty() -> Text(
                 "No matches.",
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             )
 
-            else -> LazyColumn(Modifier.fillMaxSize()) {
-                items(state.searchHits, key = { "${it.path}:${it.line}" }) { hit ->
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                controller.openNote(hit.path)
-                                controller.closeOverlays()
-                            }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
-                    ) {
-                        Text(
-                            hit.name,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Medium,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
+            else -> AndroidView(
+                factory = { context -> SearchResultsView(context) },
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                update = { view ->
+                    view.setData(
+                        results = results,
+                        collapsed = collapsed,
+                        colors = resultColors,
+                        onToggle = controller::toggleSearchCollapsed,
+                        onOpenFile = { file ->
+                            controller.openSearchResult(file, file.matches.firstOrNull())
+                        },
+                        onOpenMatch = { file, match ->
+                            controller.openSearchResult(file, match)
+                        },
+                    )
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun FindBar(
+    find: FindUiState,
+    sourceMode: Boolean,
+    controller: VibecodiumController,
+) {
+    val focusRequester = remember { FocusRequester() }
+    val palette = LocalVibecodiumPalette.current
+    val textColor = MaterialTheme.colorScheme.onSurface
+    val muted = palette.textMuted
+    val count = when {
+        find.query.isEmpty() -> ""
+        find.matches.isEmpty() -> "0/0"
+        else -> {
+            val current = (find.active.coerceAtLeast(0) + 1).coerceAtMost(find.matches.size)
+            "${current}/${find.matches.size}${if (find.truncated) "+" else ""}"
+        }
+    }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 3.dp,
+        shadowElevation = 5.dp,
+    ) {
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 5.dp)) {
+            Row(
+                Modifier.fillMaxWidth().height(36.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .height(34.dp)
+                        .clip(RoundedCornerShape(percent = 50))
+                        .background(palette.surface)
+                        .border(
+                            1.dp,
+                            palette.outline,
+                            RoundedCornerShape(percent = 50),
                         )
-                        if (hit.snippet.isNotBlank()) {
-                            Text(
-                                "${hit.line}: ${hit.snippet}",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
+                        .padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier
+                            .size(20.dp)
+                            .clip(CircleShape)
+                            .clickable(
+                                enabled = find.query.isNotEmpty(),
+                                onClick = { controller.updateFindQuery("") },
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            if (find.query.isEmpty()) Icons.Default.Search else Icons.Default.Close,
+                            contentDescription = if (find.query.isEmpty()) null else "Clear find query",
+                            // Material's close glyph is drawn tighter than the
+                            // magnifier; matching the visible extent keeps the
+                            // icon from shrinking once a query is typed.
+                            modifier = Modifier.size(if (find.query.isEmpty()) 16.dp else 20.dp),
+                            tint = muted,
+                        )
+                    }
+                    BasicTextField(
+                        value = find.query,
+                        onValueChange = controller::updateFindQuery,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .padding(horizontal = 6.dp)
+                            .focusRequester(focusRequester),
+                        singleLine = true,
+                        textStyle = TextStyle(fontSize = 14.sp, lineHeight = 18.sp, color = textColor),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        decorationBox = { inner ->
+                            Box(
+                                Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.CenterStart,
+                            ) {
+                                if (find.query.isEmpty()) {
+                                    Text(
+                                        "Find in note...",
+                                        fontSize = 13.sp,
+                                        lineHeight = 18.sp,
+                                        color = palette.textFaint,
+                                    )
+                                }
+                                inner()
+                            }
+                        },
+                    )
+                    if (count.isNotEmpty()) {
+                        Text(
+                            count,
+                            fontSize = 10.sp,
+                            color = muted,
+                            modifier = Modifier.padding(start = 4.dp),
+                        )
+                    }
+                }
+                FindToggle("Aa", find.caseSensitive) { controller.toggleFindCase() }
+                FindToggle("ab", find.wholeWord, underline = true) {
+                    controller.toggleFindWholeWord()
+                }
+                IconButton(
+                    onClick = controller::findPrevious,
+                    modifier = Modifier.size(30.dp),
+                ) {
+                    Icon(
+                        Icons.Default.KeyboardArrowUp,
+                        contentDescription = "Previous match",
+                        modifier = Modifier.size(18.dp),
+                        tint = muted,
+                    )
+                }
+                IconButton(
+                    onClick = controller::findNext,
+                    modifier = Modifier.size(30.dp),
+                ) {
+                    Icon(
+                        Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Next match",
+                        modifier = Modifier.size(18.dp),
+                        tint = muted,
+                    )
+                }
+                if (sourceMode) {
+                    IconButton(
+                        onClick = controller::toggleFindReplace,
+                        modifier = Modifier.size(30.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Edit,
+                            contentDescription = "Replace",
+                            modifier = Modifier.size(16.dp),
+                            tint = if (find.replaceOpen) MaterialTheme.colorScheme.primary else muted,
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = controller::closeFindBar,
+                    modifier = Modifier.size(30.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Close find",
+                        modifier = Modifier.size(18.dp),
+                        tint = muted,
+                    )
+                }
+            }
+            if (sourceMode && find.replaceOpen) {
+                Row(
+                    Modifier.fillMaxWidth().height(36.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        Modifier
+                            .weight(1f)
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(percent = 50))
+                            .background(palette.surface)
+                            .border(
+                                1.dp,
+                                palette.outline,
+                                RoundedCornerShape(percent = 50),
+                            )
+                            .padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            Modifier
+                                .size(20.dp)
+                                .clip(CircleShape)
+                                .clickable(
+                                    enabled = find.replace.isNotEmpty(),
+                                    onClick = { controller.updateFindReplace("") },
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                if (find.replace.isEmpty()) Icons.Default.Edit else Icons.Default.Close,
+                                contentDescription = if (find.replace.isEmpty()) null else "Clear replacement",
+                                // Match the close glyph's visible extent to the
+                                // pencil so the icon does not shrink after typing.
+                                modifier = Modifier.size(if (find.replace.isEmpty()) 16.dp else 20.dp),
+                                tint = muted,
                             )
                         }
+                        BasicTextField(
+                            value = find.replace,
+                            onValueChange = controller::updateFindReplace,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .padding(horizontal = 6.dp),
+                            singleLine = true,
+                            textStyle = TextStyle(fontSize = 13.sp, lineHeight = 18.sp, color = textColor),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                            decorationBox = { inner ->
+                                Box(
+                                    Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.CenterStart,
+                                ) {
+                                    if (find.replace.isEmpty()) {
+                                        Text("Replace with...", fontSize = 13.sp, lineHeight = 18.sp, color = palette.textFaint)
+                                    }
+                                    inner()
+                                }
+                            },
+                        )
                     }
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.25f))
+                    TextButton(onClick = controller::replaceCurrentFind) {
+                        Text("Replace", fontSize = 11.sp)
+                    }
+                    TextButton(onClick = controller::replaceAllFind) {
+                        Text("All", fontSize = 11.sp)
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun FindToggle(
+    label: String,
+    active: Boolean,
+    underline: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val color = if (active) MaterialTheme.colorScheme.primary else LocalVibecodiumPalette.current.textMuted
+    Box(
+        Modifier
+            .size(26.dp)
+            .clip(RoundedCornerShape(5.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            fontSize = 11.sp,
+            color = color,
+            textDecoration = if (underline) TextDecoration.Underline else null,
+        )
     }
 }
 
@@ -3568,6 +4574,16 @@ private enum class SettingsSection(val title: String, val icon: ImageVector) {
     About("About", Icons.Default.Info),
 }
 
+/** Size range per heading level, matching the desktop settings. */
+private val HEADING_LEVELS = listOf(
+    1 to (14..40),
+    2 to (13..36),
+    3 to (12..32),
+    4 to (11..28),
+    5 to (10..26),
+    6 to (9..24),
+)
+
 @Composable
 private fun SettingsScreen(state: UiState, controller: VibecodiumController, modifier: Modifier) {
     // Section navigation is local: changing a settings section must not
@@ -3676,6 +4692,430 @@ private fun SettingsRoot(onOpen: (SettingsSection) -> Unit) {
 }
 
 @Composable
+private fun ThemeAppearanceGroup(state: UiState, controller: VibecodiumController) {
+    val settings = state.settings
+    var themeDialogSlot by remember { mutableStateOf<ThemeSlot?>(null) }
+    val installedNames = state.installedThemes.map { it.name }
+    fun themeOptions(current: String): List<Pair<String, String>> = buildList {
+        add("Default (built-in)" to "")
+        for (name in installedNames) add(name to name)
+        if (current.isNotEmpty() && current !in installedNames) add("$current (missing)" to current)
+    }
+    val currentSlot = when (settings.themeMode) {
+        ThemeMode.Dark -> ThemeSlot.Dark
+        ThemeMode.Light -> ThemeSlot.Light
+        ThemeMode.System -> if (isSystemInDarkTheme()) ThemeSlot.Dark else ThemeSlot.Light
+    }
+    val updateCount = state.themeUpdates.size
+    SettingsGroup("Theme") {
+        SettingsChoiceRow(
+            title = "Base color scheme",
+            description = "Obsidian's palette for the built-in theme and community themes",
+            value = settings.themeMode,
+            options = listOf(
+                "Dark" to ThemeMode.Dark,
+                "Light" to ThemeMode.Light,
+                "Adapt to system" to ThemeMode.System,
+            ),
+            onSelect = controller::setThemeMode,
+        )
+        SettingsChoiceRow(
+            title = "Light theme",
+            description = "Independent theme used when the light scheme is active",
+            value = settings.lightThemeName,
+            options = themeOptions(settings.lightThemeName),
+            onSelect = { controller.setThemeName(ThemeSlot.Light, it) },
+        )
+        SettingsChoiceRow(
+            title = "Dark theme",
+            description = "Independent theme used when the dark scheme is active",
+            value = settings.darkThemeName,
+            options = themeOptions(settings.darkThemeName),
+            onSelect = { controller.setThemeName(ThemeSlot.Dark, it) },
+        )
+        SettingsActionRow(
+            title = "Manage themes",
+            description = if (state.themeCatalogLoading) {
+                "Loading the catalog…"
+            } else {
+                "Install, update and remove themes; installs into the current scheme slot"
+            },
+            onClick = {
+                controller.loadThemeCatalog()
+                themeDialogSlot = currentSlot
+            },
+            showDivider = true,
+            enabled = !state.themeCatalogLoading,
+        )
+        SettingsActionRow(
+            title = "Check for updates",
+            description = when {
+                state.themeCheckingUpdates -> "Checking installed themes…"
+                updateCount > 0 -> "$updateCount update${if (updateCount == 1) "" else "s"} available"
+                else -> "Compare installed themes with GitHub"
+            },
+            onClick = controller::checkThemeUpdates,
+            showDivider = false,
+            enabled = state.installedThemes.isNotEmpty() && !state.themeCheckingUpdates,
+        )
+    }
+    SettingsGroup("Accent") {
+        SettingsAccentRow(
+            selected = settings.accentColor,
+            onSelect = controller::setAccentColor,
+        )
+    }
+    if (state.themeWarnings.isNotEmpty()) {
+        SettingsGroup("Compatibility") {
+            SettingsInfoRow(
+                title = "Theme notes",
+                value = state.themeWarnings.joinToString("\n"),
+                multiline = true,
+            )
+        }
+    }
+    themeDialogSlot?.let { slot ->
+        ThemeManagerDialog(
+            state = state,
+            controller = controller,
+            slot = slot,
+            onClose = { themeDialogSlot = null },
+        )
+    }
+}
+
+@Composable
+private fun SettingsAccentRow(selected: Int?, onSelect: (Int?) -> Unit) {
+    val palette = LocalVibecodiumPalette.current
+    val presets = listOf(
+        "Theme" to null,
+        "Violet" to 0xFF8A5CF5.toInt(),
+        "Red" to 0xFFE93147.toInt(),
+        "Green" to 0xFF08B94E.toInt(),
+        "Blue" to 0xFF086DDD.toInt(),
+        "Orange" to 0xFFEC7500.toInt(),
+        "Pink" to 0xFFD53984.toInt(),
+    )
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Text("Accent color", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        Text(
+            "Used by buttons, links and selection; “Theme” keeps the theme's own accent",
+            modifier = Modifier.padding(top = 2.dp),
+            fontSize = 11.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(top = 10.dp)
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            presets.forEach { (label, argb) ->
+                val color = if (argb == null) palette.accent else Color(argb)
+                val active = selected == argb
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(
+                        Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(color)
+                            .border(
+                                width = if (active) 3.dp else 1.dp,
+                                color = if (active) MaterialTheme.colorScheme.onSurface else palette.outline,
+                                shape = CircleShape,
+                            )
+                            .clickable { onSelect(argb) },
+                    )
+                    Text(
+                        label,
+                        modifier = Modifier.padding(top = 4.dp),
+                        fontSize = 10.sp,
+                        color = if (active) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemeManagerDialog(
+    state: UiState,
+    controller: VibecodiumController,
+    slot: ThemeSlot,
+    onClose: () -> Unit,
+) {
+    var query by remember { mutableStateOf("") }
+    var installedOnly by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { controller.loadThemeCatalog() }
+
+    val installed = state.installedThemes
+    val installedByName = installed.associateBy { it.name }
+    val merged = LinkedHashMap<String, ThemeEntry>()
+    for (theme in installed) {
+        merged[theme.name] = theme.entry?.copy(
+            installedVersion = theme.version,
+            updateVersion = state.themeUpdates[theme.name],
+        ) ?: ThemeEntry(
+            name = theme.name,
+            author = theme.author,
+            installedVersion = theme.version,
+            updateVersion = state.themeUpdates[theme.name],
+        )
+    }
+    for (entry in state.themeCatalog) {
+        val current = merged[entry.name]
+        merged[entry.name] = if (current == null) {
+            entry.copy(
+                installedVersion = installedByName[entry.name]?.version,
+                updateVersion = state.themeUpdates[entry.name],
+            )
+        } else {
+            entry.copy(
+                installedVersion = current.installedVersion,
+                updateVersion = state.themeUpdates[entry.name],
+            )
+        }
+    }
+    val needle = query.trim().lowercase()
+    val visible = merged.values
+        .filter { entry ->
+            (needle.isEmpty() || entry.name.lowercase().contains(needle) ||
+                entry.author.lowercase().contains(needle)) &&
+                (!installedOnly || entry.installed)
+        }
+        .sortedWith(
+            compareByDescending<ThemeEntry> { it.installed }
+                .thenByDescending { it.downloads }
+                .thenBy { it.name.lowercase() },
+        )
+
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            shape = RoundedCornerShape(0.dp),
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.safeDrawing),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().height(52.dp).padding(start = 12.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        if (slot == ThemeSlot.Light) "Light theme" else "Dark theme",
+                        modifier = Modifier.weight(1f),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    TextButton(onClick = { installedOnly = !installedOnly }) {
+                        Text(if (installedOnly) "Show all" else "Installed only")
+                    }
+                    IconButton(onClick = onClose, modifier = Modifier.size(44.dp)) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", modifier = Modifier.size(20.dp))
+                    }
+                }
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                    singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp),
+                    placeholder = { Text("Search themes", fontSize = 14.sp) },
+                )
+                if (state.themeCatalogLoading || state.themeCheckingUpdates) {
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    )
+                }
+                state.themeError?.let { error ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            error,
+                            modifier = Modifier.weight(1f),
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        TextButton(onClick = { controller.clearThemeError() }) { Text("Dismiss") }
+                    }
+                }
+                if (visible.isEmpty() && !state.themeCatalogLoading) {
+                    Text(
+                        if (installedOnly) "No installed themes yet." else "No themes match this search.",
+                        modifier = Modifier.padding(16.dp),
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
+                    items(visible, key = { it.name }) { entry ->
+                        ThemeCatalogRow(entry, slot, state, controller)
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemeCatalogRow(
+    entry: ThemeEntry,
+    slot: ThemeSlot,
+    state: UiState,
+    controller: VibecodiumController,
+) {
+    val lightActive = state.settings.lightThemeName == entry.name
+    val darkActive = state.settings.darkThemeName == entry.name
+    val active = if (slot == ThemeSlot.Light) lightActive else darkActive
+    val busy = state.themeBusy == entry.name
+    val badge = when {
+        active -> "Active" to true
+        lightActive && darkActive -> "Light + Dark" to false
+        lightActive -> "Light" to false
+        darkActive -> "Dark" to false
+        entry.installed -> "Installed" to false
+        else -> null
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(
+                modifier = Modifier.padding(end = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                ThemeThumbnail(
+                    entry = entry,
+                    modifier = Modifier
+                        .width(76.dp)
+                        .height(57.dp),
+                )
+                badge?.let { (label, isActive) ->
+                    ThemeBadge(label = label, active = isActive)
+                }
+            }
+            Column(Modifier.weight(1f)) {
+                Text(entry.name, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                val meta = buildString {
+                    if (entry.author.isNotBlank()) append(entry.author)
+                    if (entry.modesLabel.isNotBlank()) {
+                        if (isNotEmpty()) append(" · ")
+                        append(entry.modesLabel)
+                    }
+                    if (entry.downloads > 0) {
+                        if (isNotEmpty()) append(" · ")
+                        append(formatDownloads(entry.downloads))
+                    }
+                }
+                if (meta.isNotBlank()) {
+                    Text(
+                        meta,
+                        modifier = Modifier.padding(top = 2.dp),
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            Column(
+                modifier = Modifier.padding(start = 8.dp),
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (busy) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                } else if (!entry.installed) {
+                    ThemeActionButton("Install", primary = true) {
+                        controller.installTheme(entry.name, slot)
+                    }
+                } else {
+                    if (!active) {
+                        ThemeActionButton("Use", primary = true) {
+                            controller.setThemeName(slot, entry.name)
+                        }
+                    }
+                    if (entry.updateVersion != null) {
+                        ThemeActionButton("Update") { controller.updateTheme(entry.name) }
+                    }
+                    ThemeActionButton("Remove") { controller.uninstallTheme(entry.name) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ThemeBadge(label: String, active: Boolean) {
+    val primary = MaterialTheme.colorScheme.primary
+    val background = if (active) {
+        primary.copy(alpha = 0.14f)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    val border = if (active) primary.copy(alpha = 0.55f) else MaterialTheme.colorScheme.outline
+    Box(
+        Modifier
+            .padding(top = 4.dp)
+            .clip(CircleShape)
+            .background(background)
+            .border(1.dp, border, CircleShape)
+            .padding(horizontal = 9.dp, vertical = 2.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            fontSize = 9.sp,
+            lineHeight = 11.sp,
+            fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+            color = if (active) primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun ThemeActionButton(
+    text: String,
+    primary: Boolean = false,
+    onClick: () -> Unit,
+) {
+    if (primary) {
+        Button(
+            onClick = onClick,
+            modifier = Modifier.height(34.dp),
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+        ) {
+            Text(text, fontSize = 12.sp, maxLines = 1)
+        }
+    } else {
+        OutlinedButton(
+            onClick = onClick,
+            modifier = Modifier.height(34.dp),
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+        ) {
+            Text(text, fontSize = 12.sp, maxLines = 1)
+        }
+    }
+}
+
+private fun formatDownloads(count: Int): String = when {
+    count >= 1_000_000 -> "${count / 1_000_000}.${(count % 1_000_000) / 100_000}M"
+    count >= 1_000 -> "${count / 1_000}.${(count % 1_000) / 100}K"
+    else -> count.toString()
+}
+
+@Composable
 private fun SettingsSectionContent(
     section: SettingsSection,
     state: UiState,
@@ -3691,15 +5131,51 @@ private fun SettingsSectionContent(
     ) {
         when (section) {
             SettingsSection.Appearance -> {
+                ThemeAppearanceGroup(state, controller)
                 SettingsGroup("Text") {
                     SettingsSliderRow(
                         title = "Text scale",
-                        description = "Scales interface text. The native editor keeps its own font size.",
+                        description = "Scales interface text.",
                         value = settings.textScale,
                         range = AppSettingsJson.MIN_TEXT_SCALE..AppSettingsJson.MAX_TEXT_SCALE,
                         format = { "${(it * 100).roundToInt()}%" },
                         onCommit = controller::setTextScale,
+                        showDivider = true,
                     )
+                    SettingsStepperRow(
+                        title = "Editor font size",
+                        description = "Body text in the source editor. Line spacing follows it.",
+                        value = settings.editorFontDp,
+                        range = AppSettingsJson.MIN_EDITOR_FONT_DP..AppSettingsJson.MAX_EDITOR_FONT_DP,
+                        format = { "$it dp" },
+                        onChange = controller::setEditorFontSize,
+                        showDivider = true,
+                    )
+                    SettingsStepperRow(
+                        title = "Code block font size",
+                        description = "Fenced code blocks. Can be smaller than body text.",
+                        value = settings.codeFontDp,
+                        range = AppSettingsJson.MIN_CODE_FONT_DP..AppSettingsJson.MAX_CODE_FONT_DP,
+                        format = { "$it dp" },
+                        onChange = controller::setCodeFontSize,
+                        showDivider = true,
+                    )
+                    SettingsChoiceRow(
+                        title = "Text font",
+                        description = "Markdown prose, lists, quotes and headings",
+                        value = settings.textFontFace,
+                        options = EDITOR_FONT_FACE_OPTIONS,
+                        onSelect = controller::setTextFontFace,
+                    )
+                    EditorFontSample(settings.textFontFace, showDivider = true)
+                    SettingsChoiceRow(
+                        title = "Code font",
+                        description = "Fenced and inline code, and code files",
+                        value = settings.codeFontFace,
+                        options = EDITOR_FONT_FACE_OPTIONS,
+                        onSelect = controller::setCodeFontFace,
+                    )
+                    EditorFontSample(settings.codeFontFace)
                 }
                 SettingsGroup("Interface") {
                     SettingsSwitchRow(
@@ -3720,6 +5196,7 @@ private fun SettingsSectionContent(
             }
 
             SettingsSection.Editor -> {
+                var colorHeading by remember { mutableStateOf<Int?>(null) }
                 SettingsGroup("View") {
                     SettingsChoiceRow(
                         title = "Default view",
@@ -3730,6 +5207,21 @@ private fun SettingsSectionContent(
                             "Reading" to EditorMode.Preview,
                         ),
                         onSelect = controller::setDefaultEditorMode,
+                        showDivider = true,
+                    )
+                    SettingsSwitchRow(
+                        title = "Highlight current line",
+                        description = "Tint the line with the caret while editing",
+                        checked = settings.highlightCurrentLine,
+                        onChange = controller::setHighlightCurrentLine,
+                        showDivider = true,
+                    )
+                    SettingsSwitchRow(
+                        title = "Highlight wrapped lines in gutter",
+                        description = "Tint the whole wrapped line in the gutter instead of only the caret row",
+                        checked = settings.highlightWrappedLineInGutter,
+                        onChange = controller::setHighlightWrappedLineInGutter,
+                        showDivider = false,
                     )
                 }
                 SettingsGroup("Saving") {
@@ -3743,6 +5235,31 @@ private fun SettingsSectionContent(
                             "1.2 s" to 1200,
                         ),
                         onSelect = controller::setAutoSaveDelay,
+                    )
+                }
+                SettingsGroup("Headings") {
+                    HEADING_LEVELS.forEachIndexed { index, (level, range) ->
+                        HeadingStyleRow(
+                            level = level,
+                            style = settings.headings.style(level),
+                            range = range,
+                            onSizeChange = { controller.setHeadingFontSize(level, it) },
+                            onColorClick = { colorHeading = level },
+                            onToggleBold = { controller.toggleHeadingBold(level) },
+                            onToggleItalic = { controller.toggleHeadingItalic(level) },
+                            showDivider = index != HEADING_LEVELS.lastIndex,
+                        )
+                    }
+                }
+                colorHeading?.let { level ->
+                    HeadingColorDialog(
+                        title = "H$level",
+                        current = settings.headings.style(level).colorName,
+                        onDismiss = { colorHeading = null },
+                        onSelect = { name ->
+                            controller.setHeadingColor(level, name)
+                            colorHeading = null
+                        },
                     )
                 }
             }
@@ -3793,6 +5310,7 @@ private fun SettingsSectionContent(
                         value = daily.format,
                         options = dailyFormatOptions(daily.format),
                         onSelect = controller::setDailyNoteFormat,
+                        showDivider = true,
                     )
                     SettingsTextFieldRow(
                         title = "File name format",
@@ -3810,6 +5328,7 @@ private fun SettingsSectionContent(
                         value = daily.folder,
                         options = dailyFolderOptions(state, daily.folder),
                         onSelect = controller::setDailyNoteFolder,
+                        showDivider = true,
                     )
                     SettingsChoiceRow(
                         title = "Template",
@@ -3847,8 +5366,8 @@ private fun SettingsSectionContent(
                 }
                 SettingsGroup("App") {
                     SettingsInfoRow(
-                        "vibecodium",
-                        "0.1.0",
+                        "Vibecodium",
+                        BuildConfig.VERSION_NAME,
                         detail = "Rust core · Compose shell",
                     )
                     SettingsInfoRow("Rust core", coreVersion)
@@ -3979,6 +5498,7 @@ private fun SettingsSliderRow(
     range: ClosedFloatingPointRange<Float>,
     format: (Float) -> String,
     onCommit: (Float) -> Unit,
+    showDivider: Boolean = false,
 ) {
     var draft by remember(value) { mutableStateOf(value) }
     Column(
@@ -4014,6 +5534,293 @@ private fun SettingsSliderRow(
                 .padding(top = 2.dp),
         )
     }
+    if (showDivider) {
+        HorizontalDivider(
+            modifier = Modifier.padding(start = 16.dp),
+            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+        )
+    }
+}
+
+@Composable
+private fun SettingsStepperRow(
+    title: String,
+    description: String,
+    value: Int,
+    range: IntRange,
+    format: (Int) -> String,
+    onChange: (Int) -> Unit,
+    showDivider: Boolean = false,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 60.dp)
+            .padding(start = 16.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            if (description.isNotBlank()) {
+                Text(
+                    description,
+                    modifier = Modifier.padding(top = 2.dp),
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        IconButton(
+            onClick = { onChange(value - 1) },
+            enabled = value > range.first,
+            modifier = Modifier.size(40.dp),
+        ) {
+            Icon(
+                MinusIcon,
+                contentDescription = "Decrease $title",
+                modifier = Modifier.size(18.dp),
+            )
+        }
+        Text(
+            format(value),
+            modifier = Modifier.widthIn(min = 44.dp),
+            textAlign = TextAlign.Center,
+            fontSize = 13.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        IconButton(
+            onClick = { onChange(value + 1) },
+            enabled = value < range.last,
+            modifier = Modifier.size(40.dp),
+        ) {
+            Icon(
+                Icons.Default.Add,
+                contentDescription = "Increase $title",
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+    if (showDivider) {
+        HorizontalDivider(
+            modifier = Modifier.padding(start = 16.dp),
+            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+        )
+    }
+}
+
+@Composable
+private fun HeadingStyleRow(
+    level: Int,
+    style: HeadingStyle,
+    range: IntRange,
+    onSizeChange: (Int) -> Unit,
+    onColorClick: () -> Unit,
+    onToggleBold: () -> Unit,
+    onToggleItalic: () -> Unit,
+    showDivider: Boolean,
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("H$level", fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text(
+                HeadingColors.hex(style.colorName),
+                modifier = Modifier.padding(top = 2.dp),
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        IconButton(
+            onClick = { onSizeChange(style.fontSize - 1) },
+            enabled = style.fontSize > range.first,
+            modifier = Modifier.size(32.dp),
+        ) {
+            Icon(MinusIcon, contentDescription = "Decrease H$level size", modifier = Modifier.size(16.dp))
+        }
+        Text(
+            "${style.fontSize}",
+            modifier = Modifier.widthIn(min = 28.dp),
+            textAlign = TextAlign.Center,
+            fontSize = 12.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        IconButton(
+            onClick = { onSizeChange(style.fontSize + 1) },
+            enabled = style.fontSize < range.last,
+            modifier = Modifier.size(32.dp),
+        ) {
+            Icon(Icons.Default.Add, contentDescription = "Increase H$level size", modifier = Modifier.size(16.dp))
+        }
+        Box(
+            Modifier
+                .padding(start = 4.dp)
+                .size(26.dp)
+                .clip(CircleShape)
+                .background(headingColor(HeadingColors.rgb(style.colorName)))
+                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
+                .clickable(onClick = onColorClick),
+        )
+        HeadingFormatToggle(
+            label = "B",
+            active = style.bold,
+            italic = false,
+            onClick = onToggleBold,
+        )
+        HeadingFormatToggle(
+            label = "I",
+            active = style.italic,
+            italic = true,
+            onClick = onToggleItalic,
+        )
+    }
+    if (showDivider) {
+        HorizontalDivider(
+            modifier = Modifier.padding(start = 16.dp),
+            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+        )
+    }
+}
+
+@Composable
+private fun HeadingFormatToggle(
+    label: String,
+    active: Boolean,
+    italic: Boolean,
+    onClick: () -> Unit,
+) {
+    val accent = MaterialTheme.colorScheme.primary
+    val shape = RoundedCornerShape(6.dp)
+    Box(
+        Modifier
+            .padding(start = 4.dp)
+            .size(30.dp)
+            .clip(shape)
+            .background(if (active) accent.copy(alpha = 0.18f) else Color.Transparent)
+            .border(1.dp, if (active) accent else MaterialTheme.colorScheme.outline, shape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            fontStyle = if (italic) FontStyle.Italic else FontStyle.Normal,
+            color = if (active) accent else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** Palette and custom hex picker for one heading level, following the desktop popup. */
+@Composable
+private fun HeadingColorDialog(
+    title: String,
+    current: String,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit,
+) {
+    var hex by remember(current) { mutableStateOf(HeadingColors.hex(current)) }
+    val parsed = HeadingColors.parseHex(hex)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("$title colour") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                HeadingColors.presets.chunked(4).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        row.forEach { preset ->
+                            val selected = preset.rgb == HeadingColors.rgb(current)
+                            Box(
+                                Modifier
+                                    .size(30.dp)
+                                    .clip(CircleShape)
+                                    .background(headingColor(preset.rgb))
+                                    .border(
+                                        width = if (selected) 2.dp else 1.dp,
+                                        color = if (selected) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.outline
+                                        },
+                                        shape = CircleShape,
+                                    )
+                                    .clickable { onSelect(preset.id) },
+                            )
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = hex,
+                    onValueChange = { hex = it },
+                    label = { Text("Hex") },
+                    singleLine = true,
+                    isError = parsed == null,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { parsed?.let { onSelect("#%06X".format(it)) } },
+                enabled = parsed != null,
+            ) {
+                Text("Apply")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        },
+    )
+}
+
+private fun headingColor(rgb: Int): Color = Color(0xFF000000.toInt() or rgb)
+
+private val EDITOR_FONT_FACE_OPTIONS = listOf(
+    "System" to EditorFontFace.System,
+    "Monospace" to EditorFontFace.Mono,
+    "Serif" to EditorFontFace.Serif,
+)
+
+private fun EditorFontFace.previewFamily(): FontFamily = when (this) {
+    EditorFontFace.System -> FontFamily.Default
+    EditorFontFace.Mono -> FontFamily.Monospace
+    EditorFontFace.Serif -> FontFamily.Serif
+}
+
+/** Sample text under a font choice so the difference is visible before switching. */
+@Composable
+private fun EditorFontSample(face: EditorFontFace, showDivider: Boolean = false) {
+    val family = face.previewFamily()
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 16.dp, top = 2.dp, bottom = 10.dp),
+    ) {
+        Text(
+            "Aa Бб 123 — съешь ещё этих мягких французских булок",
+            fontSize = 14.sp,
+            fontFamily = family,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Text(
+            "if (x == 42) { return \"OK\"; }",
+            modifier = Modifier.padding(top = 2.dp),
+            fontSize = 13.sp,
+            fontFamily = family,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    if (showDivider) {
+        HorizontalDivider(
+            modifier = Modifier.padding(start = 16.dp),
+            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+        )
+    }
 }
 
 @Composable
@@ -4023,35 +5830,46 @@ private fun <T> SettingsChoiceRow(
     value: T,
     options: List<Pair<String, T>>,
     onSelect: (T) -> Unit,
+    showDivider: Boolean = false,
 ) {
     var open by remember { mutableStateOf(false) }
     val label = options.firstOrNull { it.second == value }?.first ?: ""
-    Box(Modifier.fillMaxWidth()) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        Text(title, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+        if (description.isNotBlank()) {
+            Text(
+                description,
+                modifier = Modifier.padding(top = 2.dp),
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        // The value button sits under the description and spans the whole row:
+        // a grey field reads as an input, unlike a value tucked to the right.
+        val buttonShape = RoundedCornerShape(14.dp)
         Row(
             Modifier
                 .fillMaxWidth()
+                .padding(top = 8.dp)
+                .clip(buttonShape)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .border(1.dp, MaterialTheme.colorScheme.outline, buttonShape)
                 .clickable { open = true }
-                .heightIn(min = 56.dp)
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(title, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                if (description.isNotBlank()) {
-                    Text(
-                        description,
-                        modifier = Modifier.padding(top = 2.dp),
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
             Text(
                 label,
+                modifier = Modifier.weight(1f),
                 fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(8.dp))
             Icon(
                 Icons.Default.KeyboardArrowDown,
                 contentDescription = null,
@@ -4059,25 +5877,142 @@ private fun <T> SettingsChoiceRow(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            options.forEach { (optionLabel, optionValue) ->
-                val selected = optionValue == value
-                DropdownMenuItem(
-                    text = { Text(optionLabel) },
-                    trailingIcon = {
-                        if (selected) {
-                            Icon(
-                                Icons.Default.Check,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
+    }
+    if (open) {
+        SettingsChoiceDialog(
+            title = title,
+            value = value,
+            options = options,
+            onSelect = { optionValue ->
+                open = false
+                onSelect(optionValue)
+            },
+            onDismiss = { open = false },
+        )
+    }
+    if (showDivider) {
+        HorizontalDivider(
+            modifier = Modifier.padding(start = 16.dp),
+            color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+        )
+    }
+}
+
+/**
+ * Modal option picker. A long choice list (daily-note folders, templates)
+ * scrolls inside the dialog with the same thin scrollbar as the tab menu.
+ */
+@Composable
+private fun <T> SettingsChoiceDialog(
+    title: String,
+    value: T,
+    options: List<Pair<String, T>>,
+    onSelect: (T) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        BoxWithConstraints(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.55f))
+                .pointerInput(Unit) { detectTapGestures(onTap = { onDismiss() }) },
+            contentAlignment = Alignment.Center,
+        ) {
+            // Cap the list against the dialog window itself: a LazyColumn here
+            // would stretch the card to the window height.
+            val listMaxHeight = (maxHeight * 0.6f).coerceAtLeast(200.dp)
+            Surface(
+                modifier = Modifier
+                    .widthIn(max = 560.dp)
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    // Swallow taps inside the card so they do not reach the
+                    // dismiss-on-tap scrim behind it.
+                    .pointerInput(Unit) { detectTapGestures { } },
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 6.dp,
+                shadowElevation = 10.dp,
+            ) {
+                Column {
+                    Text(
+                        title,
+                        modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 12.dp),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f))
+                    Box(Modifier.fillMaxWidth()) {
+                        val scrollState = rememberScrollState()
+                        var viewportPx by remember { mutableStateOf(0) }
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = listMaxHeight)
+                                // Measure the clipped viewport, not the content:
+                                // the scroll node must stay outside the observer.
+                                .onSizeChanged { viewportPx = it.height }
+                                .verticalScroll(scrollState)
+                                .padding(vertical = 6.dp),
+                        ) {
+                            options.forEach { option ->
+                                val (optionLabel, optionValue) = option
+                                val selected = optionValue == value
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onSelect(optionValue) }
+                                        .padding(horizontal = 20.dp, vertical = 9.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        optionLabel,
+                                        modifier = Modifier.weight(1f),
+                                        fontSize = 14.sp,
+                                        color = if (selected) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface
+                                        },
+                                    )
+                                    if (selected) {
+                                        Spacer(Modifier.width(10.dp))
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        val density = LocalDensity.current
+                        val contentPx = viewportPx + scrollState.maxValue
+                        if (scrollState.maxValue > 0 && viewportPx > 0 && contentPx > 0) {
+                            val track = with(density) { viewportPx.toDp() }
+                            val thumb = (track * (viewportPx.toFloat() / contentPx))
+                                .coerceAtLeast(24.dp)
+                                .coerceAtMost(track)
+                            val maxOffset = (track - thumb).coerceAtLeast(0.dp)
+                            val offset = maxOffset * (scrollState.value.toFloat() / scrollState.maxValue)
+                            Box(
+                                Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(end = 3.dp)
+                                    .offset(y = offset)
+                                    .width(6.dp)
+                                    .height(thumb)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF9E9E9E))
+                                    .border(1.dp, Color(0xFF4A4A4A), CircleShape),
                             )
                         }
-                    },
-                    onClick = {
-                        open = false
-                        onSelect(optionValue)
-                    },
-                )
+                    }
+                }
             }
         }
     }
@@ -4610,6 +6545,12 @@ private fun SettingsFolderEditor(
                 )
             }
         }
+        if (folders.isNotEmpty()) {
+            HorizontalDivider(
+                modifier = Modifier.padding(start = 16.dp),
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.5f),
+            )
+        }
         if (folders.isEmpty()) {
             Text(
                 "No folders excluded",
@@ -4662,7 +6603,7 @@ private fun syncSubtitle(state: UiState): String {
         sync.connected && sync.lastSync > 0 -> "Synced ${timeLabel(sync.lastSync)}"
         sync.connected -> "Dropbox connected"
         state.vaultKind == "saf" -> "SAF vault"
-        else -> "vibecodium"
+        else -> "Vibecodium"
     }
 }
 

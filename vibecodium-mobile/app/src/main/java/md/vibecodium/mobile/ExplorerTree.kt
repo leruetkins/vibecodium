@@ -90,30 +90,67 @@ fun buildExplorerTree(
     return root.freeze()
 }
 
+/** Name shown in the explorer: folders keep it, files lose the extension. */
+fun explorerDisplayName(node: ExplorerNode): String =
+    if (node.isFolder) node.name else node.name.substringBeforeLast('.', node.name)
+
 /**
- * Keeps files whose name or path matches [query] plus the folders needed to
- * reach them. A matching folder keeps its whole subtree, which is what a file
- * picker normally does when the user searches for a folder.
+ * Keeps nodes whose displayed name matches [query] plus the folders needed to
+ * reach them. A matching folder keeps its whole subtree so it can be expanded
+ * and browsed; the folder itself stays closed until the user opens it.
  */
 fun filterExplorerTree(tree: List<ExplorerNode>, query: String): List<ExplorerNode> {
     val needle = query.trim().lowercase()
     if (needle.isEmpty()) return tree
 
     fun filter(nodes: List<ExplorerNode>): List<ExplorerNode> = nodes.mapNotNull { node ->
-        val selfMatch = if (node.isFolder) {
-            node.name.lowercase().contains(needle)
+        val selfMatch = explorerDisplayName(node).lowercase().contains(needle)
+        if (selfMatch) {
+            node.copy(children = node.children)
         } else {
-            node.path.lowercase().contains(needle)
-        }
-        val children = if (selfMatch && node.isFolder) node.children else filter(node.children)
-        if (selfMatch || children.isNotEmpty()) {
-            node.copy(children = children)
-        } else {
-            null
+            val children = filter(node.children)
+            if (children.isNotEmpty()) {
+                node.copy(children = children)
+            } else {
+                null
+            }
         }
     }
 
     return filter(tree)
+}
+
+/**
+ * Folders that should auto-expand to reveal matches. A folder whose own name
+ * matched is deliberately excluded: its subtree is kept, but the user expands
+ * it manually. Ancestors of matching files/folders still open automatically.
+ */
+fun filteredAncestorsForQuery(tree: List<ExplorerNode>, query: String): Set<String> {
+    val needle = query.trim().lowercase()
+    if (needle.isEmpty()) return emptySet()
+    val result = mutableSetOf<String>()
+    fun visit(nodes: List<ExplorerNode>): Boolean {
+        var anyMatch = false
+        for (node in nodes) {
+            val selfMatch = explorerDisplayName(node).lowercase().contains(needle)
+            if (node.isFolder) {
+                if (selfMatch) {
+                    anyMatch = true
+                    continue
+                }
+                val childMatch = visit(node.children)
+                if (childMatch) {
+                    result.add(node.path)
+                    anyMatch = true
+                }
+            } else if (selfMatch) {
+                anyMatch = true
+            }
+        }
+        return anyMatch
+    }
+    visit(tree)
+    return result
 }
 
 /** Depth-first rows, skipping children of collapsed folders. */

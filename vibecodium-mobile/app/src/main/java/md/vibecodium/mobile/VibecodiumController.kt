@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.PowerManager
 import android.os.SystemClock
@@ -16,13 +17,18 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import java.io.File
 import java.time.LocalDateTime
+
+/** Hard cap on in-page matches, matching the desktop find bar. */
+private const val MAX_FIND_MATCHES = 19_999
 
 /**
  * Holds the phone shell state, owns the active [VaultRepository] and every JNI
@@ -37,6 +43,7 @@ class VibecodiumController(context: Context) {
     private var locator: VaultLocator? = null
 
     private val prefs = appContext.getSharedPreferences("vibecodium", Context.MODE_PRIVATE)
+    private val themeManager by lazy { ThemeManager(appContext) }
     private val syncRecords by lazy { SyncDatabase(appContext) }
     private val dropboxTokens by lazy { DropboxTokenStore(appContext) }
     private var syncJob: Job? = null
@@ -45,12 +52,30 @@ class VibecodiumController(context: Context) {
     var state by mutableStateOf(UiState())
         private set
 
+    /**
+     * True while a toolbar popup is open. Read by the shell so the bottom
+     * seam strip appears in the same frame as the page cover, instead of
+     * waiting for the popup window's first draw.
+     */
+    var popupCover by mutableStateOf(false)
+
     private var saveJob: Job? = null
     private var derivedJob: Job? = null
     private var searchJob: Job? = null
+    private var findJob: Job? = null
     private var tabPersistJob: Job? = null
+    private var themeJob: Job? = null
+    private var nativePaletteKey: Pair<Boolean, ThemePalette>? = null
     private var syncWakeLock: PowerManager.WakeLock? = null
     private var syncProgressAt = 0L
+
+    /**
+     * Tab path whose first rendered frame closes the open drawer or tab list.
+     * Until it arrives the editor surface still holds the previous note's
+     * pixels, so closing earlier would flash that note for a couple of frames.
+     */
+    private var pendingFramePath: String? = null
+    private var pendingFrameReady: (() -> Unit)? = null
 
     /**
      * Cancellation is not a failure. A superseded search or a vault switch
@@ -63,10 +88,43 @@ class VibecodiumController(context: Context) {
     }
 
     init {
+        val settings = SettingsStore.load(appContext)
+        val tablet = appContext.resources.configuration.smallestScreenWidthDp >= 600
+        val lightConfig = if (settings.lightThemeName.isNotBlank()) {
+            themeManager.readConfig(settings.lightThemeName, dark = false)
+        } else {
+            null
+        }
+        val darkConfig = if (settings.darkThemeName.isNotBlank()) {
+            themeManager.readConfig(settings.darkThemeName, dark = true)
+        } else {
+            null
+        }
         state = state.copy(
-            settings = SettingsStore.load(appContext),
+            settings = settings,
             knownVaults = VaultListStore.load(appContext),
+            themeLightPalette = lightConfig
+                ?.palette(dark = false, isTablet = tablet)
+                ?.withAccent(settings.accentColor)
+                ?: ThemePalette.defaultLight(),
+            themeDarkPalette = darkConfig
+                ?.palette(dark = true, isTablet = tablet)
+                ?.withAccent(settings.accentColor)
+                ?: ThemePalette.defaultDark(),
+            themeWarnings = ThemeManager.collapseWarnings(
+                lightConfig?.warnings.orEmpty() + darkConfig?.warnings.orEmpty(),
+            ),
         )
+        // Publish the parsed palette before the first Compose frame and before
+        // the native surfaces attach. Only cold/missing configs need a parse.
+        applyNativePalette()
+        // Warm start: the configs already contain both palettes. Only rebuild
+        // when a selected theme has no valid artifact yet; the installed list
+        // is loaded lazily when Settings/Appearance opens.
+        val needsThemeRebuild =
+            (settings.lightThemeName.isNotBlank() && lightConfig == null) ||
+                (settings.darkThemeName.isNotBlank() && darkConfig == null)
+        if (needsThemeRebuild) refreshThemeState()
         VaultLocatorStore.load(appContext)?.let { locator ->
             // Keep the launch spinner up until the repository and the saved
             // tabs are ready, instead of flashing the start and empty screens.
@@ -96,7 +154,6 @@ class VibecodiumController(context: Context) {
         state = state.copy(
             vaultChooserOpen = true,
             drawer = null,
-            tabSwitcher = false,
             settingsOpen = false,
             settingsSection = null,
         )
@@ -115,6 +172,13 @@ class VibecodiumController(context: Context) {
 
     fun forgetKnownVault(vault: KnownVault) {
         state = state.copy(knownVaults = VaultListStore.forget(appContext, vault.locator))
+    }
+
+    fun removeRecent(path: String) {
+        val key = locatorKey()
+        if (key.isEmpty()) return
+        val recent = RecentStore.forget(appContext, key, path)
+        state = state.copy(recentFiles = recent)
     }
 
     fun clearRecent() {
@@ -197,7 +261,6 @@ class VibecodiumController(context: Context) {
             activeTab = -1,
             loading = false,
             drawer = null,
-            tabSwitcher = false,
             editorMode = state.settings.defaultEditorMode,
             lines = emptyList(),
             markdownText = "",
@@ -206,7 +269,9 @@ class VibecodiumController(context: Context) {
             history = emptyList(),
             historyIndex = -1,
             searchQuery = "",
-            searchHits = emptyList(),
+            searchResults = emptyList(),
+            searchCollapsedPaths = emptySet(),
+            find = FindUiState(),
             deletePath = null,
             viewerPath = null,
             renamePath = null,
@@ -214,6 +279,7 @@ class VibecodiumController(context: Context) {
             explorerRenamePath = null,
             explorerRenameValue = "",
             explorerRenameFolder = false,
+            openAfterRenamePath = null,
         )
         if (restoreTabs(repository)) persistTabs()
         // Saved tabs are now in memory. Only at this point may the shell show
@@ -335,14 +401,24 @@ class VibecodiumController(context: Context) {
         pushHistory: Boolean = true,
         modeOverride: EditorMode? = null,
         focusEditor: Boolean = false,
+        /** Char offset to select after the tab's first frame, for search hits. */
+        revealOffset: Int? = null,
+        revealLength: Int = 0,
     ) {
+        if (state.find.open) closeFindBar()
         val existing = state.tabs.indexOfFirst { it.path == path }
         if (existing >= 0) {
+            val targetOffset = revealOffset
             selectTab(
                 index = existing,
-                modeOverride = modeOverride,
+                modeOverride = modeOverride ?: if (targetOffset != null) EditorMode.Source else null,
                 focusEditor = focusEditor,
                 pushHistory = pushHistory,
+                onReady = if (targetOffset != null) {
+                    { activeEditorView?.revealOffset(targetOffset, revealLength) }
+                } else {
+                    null
+                },
             )
             return
         }
@@ -350,7 +426,9 @@ class VibecodiumController(context: Context) {
         scope.launch {
             try {
                 val text = repository.readNote(path)
-                val mode = modeOverride ?: state.settings.defaultEditorMode
+                val mode = modeOverride
+                    ?: if (revealOffset != null) EditorMode.Source
+                    else state.settings.defaultEditorMode
                 val tab = Tab(
                     path = path,
                     title = titleOf(path),
@@ -363,13 +441,15 @@ class VibecodiumController(context: Context) {
                 state = state.copy(
                     tabs = tabs,
                     activeTab = tabs.lastIndex,
-                    drawer = null,
-                    tabSwitcher = false,
+                    // The drawer closes once the editor has drawn this note.
                     viewerPath = null,
                     editorMode = mode,
                     recentFiles = RecentStore.remember(appContext, locatorKey(), path),
                     focusRequestId = if (focusEditor) state.focusRequestId + 1 else state.focusRequestId,
                 )
+                awaitTabFrame(path) {
+                    revealOffset?.let { activeEditorView?.revealOffset(it, revealLength) }
+                }
                 if (pushHistory) pushHistory(path)
                 refreshDerived(text, force = mode == EditorMode.Preview)
                 persistTabs()
@@ -457,12 +537,38 @@ class VibecodiumController(context: Context) {
             delay(200)
             refreshDerived(adjusted.text)
         }
+        if (state.find.open && adjusted.text != currentTab.text) {
+            scanFind()
+        }
         schedulePersistTabs()
     }
 
     /** Text coming from the native SurfaceView editor. */
-    fun updateNativeEditor(text: String, selection: Int) {
-        val index = state.activeTab
+    /** The editor view currently on screen, used by the bottom toolbar. */
+    private var activeEditorView: NativeEditorView? = null
+
+    fun attachEditorView(view: NativeEditorView?) {
+        activeEditorView = view
+    }
+
+    fun toggleActiveTableSource() {
+        activeEditorView?.toggleTableSource()
+    }
+
+    fun undoEditor() {
+        activeEditorView?.undo()
+    }
+
+    fun redoEditor() {
+        activeEditorView?.redo()
+    }
+
+    fun setEditorHistoryState(canUndo: Boolean, canRedo: Boolean) {
+        if (state.editorCanUndo == canUndo && state.editorCanRedo == canRedo) return
+        state = state.copy(editorCanUndo = canUndo, editorCanRedo = canRedo)
+    }
+
+    fun updateNativeEditor(text: String, selection: Int) {        val index = state.activeTab
         val tab = state.tabs.getOrNull(index) ?: return
         if (!tab.isLoaded) return
         if (text == tab.text) {
@@ -571,9 +677,17 @@ class VibecodiumController(context: Context) {
         modeOverride: EditorMode? = null,
         focusEditor: Boolean = false,
         pushHistory: Boolean = false,
+        /**
+         * Runs once the switched tab's first frame is on screen. The tab list
+         * keeps its popup open until then, so neither the previous note nor a
+         * blank editor flashes between the switch and the new render.
+         */
+        onReady: (() -> Unit)? = null,
     ) {
+        if (state.find.open) closeFindBar()
         if (index !in state.tabs.indices) {
-            state = state.copy(drawer = null, tabSwitcher = false)
+            state = state.copy(drawer = null)
+            onReady?.invoke()
             return
         }
         saveActiveNow()
@@ -582,10 +696,21 @@ class VibecodiumController(context: Context) {
         val focusReq = if (focusEditor) state.focusRequestId + 1 else state.focusRequestId
 
         if (!target.isLoaded) {
-            loadTabContent(index, modeOverride, focusEditor, pushHistory)
+            // Switch right away so the tab row turns active and the menu can
+            // close; the body loads behind the editor spinner.
+            state = state.copy(
+                activeTab = index,
+                editorMode = mode,
+                recentFiles = RecentStore.remember(appContext, locatorKey(), target.path),
+                viewerPath = null,
+                focusRequestId = focusReq,
+                drawer = null,
+            )
+            loadTabContent(index, modeOverride, focusEditor, pushHistory, onReady)
             return
         }
 
+        val sameTab = index == state.activeTab
         val tabs = if (mode != target.mode) {
             val list = state.tabs.toMutableList()
             list[index] = target.copy(mode = mode)
@@ -598,11 +723,12 @@ class VibecodiumController(context: Context) {
             activeTab = index,
             editorMode = mode,
             recentFiles = RecentStore.remember(appContext, locatorKey(), target.path),
-            drawer = null,
-            tabSwitcher = false,
+            // Kept open until the editor has drawn the new tab.
+            drawer = if (sameTab) null else state.drawer,
             viewerPath = null,
             focusRequestId = focusReq,
         )
+        if (sameTab) onReady?.invoke() else awaitTabFrame(target.path, onReady)
         if (pushHistory) pushHistory(target.path)
         scope.launch {
             refreshDerived(
@@ -619,6 +745,7 @@ class VibecodiumController(context: Context) {
         modeOverride: EditorMode? = null,
         focusEditor: Boolean = false,
         pushHistory: Boolean = false,
+        onReady: (() -> Unit)? = null,
     ) {
         val repository = repository ?: return
         val target = state.tabs.getOrNull(index) ?: return
@@ -639,17 +766,25 @@ class VibecodiumController(context: Context) {
                 val cur = tabs.indexOfFirst { it.path == target.path }
                 if (cur >= 0) {
                     tabs[cur] = loaded
-                    state = state.copy(
-                        tabs = tabs,
-                        activeTab = cur,
-                        editorMode = mode,
-                        recentFiles = RecentStore.remember(appContext, locatorKey(), loaded.path),
-                        drawer = null,
-                        tabSwitcher = false,
-                        viewerPath = null,
-                        focusRequestId = focusReq,
-                    )
+                    // The user may have picked another tab while this body was
+                    // loading; only the still-active tab owns the editor state.
+                    val stillActive = state.tabs.getOrNull(state.activeTab)?.path == loaded.path
+                    state = if (stillActive) {
+                        state.copy(
+                            tabs = tabs,
+                            activeTab = cur,
+                            editorMode = mode,
+                            recentFiles = RecentStore.remember(appContext, locatorKey(), loaded.path),
+                            // Kept open until the editor has drawn the new tab.
+                            viewerPath = null,
+                            focusRequestId = focusReq,
+                            drawer = null,
+                        )
+                    } else {
+                        state.copy(tabs = tabs)
+                    }
                     if (pushHistory) pushHistory(loaded.path)
+                    if (stillActive) awaitTabFrame(loaded.path, onReady)
                     refreshDerived(
                         loaded.text,
                         force = mode == EditorMode.Preview,
@@ -661,10 +796,35 @@ class VibecodiumController(context: Context) {
                 state = state.copy(
                     message = error.message ?: "Could not read the note",
                     drawer = null,
-                    tabSwitcher = false,
                 )
+                onReady?.invoke()
             }
         }
+    }
+
+    /** Called by the editor view once [path]'s first frame is on screen. */
+    fun onTabFrameShown(path: String) {
+        if (pendingFramePath != path) return
+        finishPendingFrame()
+    }
+
+    private fun awaitTabFrame(path: String, onReady: (() -> Unit)?) {
+        pendingFramePath = path
+        pendingFrameReady = onReady
+        // Fallback for surfaces that never draw (not attached yet): never
+        // leave the drawer or the tab list hanging on a missing callback.
+        scope.launch {
+            delay(600)
+            if (pendingFramePath == path) finishPendingFrame()
+        }
+    }
+
+    private fun finishPendingFrame() {
+        val ready = pendingFrameReady
+        pendingFramePath = null
+        pendingFrameReady = null
+        state = state.copy(drawer = null)
+        ready?.invoke()
     }
 
     fun closeTab(index: Int) {
@@ -700,6 +860,30 @@ class VibecodiumController(context: Context) {
         persistTabs()
     }
 
+    /** Closes every open tab; dirty documents are saved first. */
+    fun closeAllTabs() {
+        if (state.tabs.isEmpty()) return
+        saveJob?.cancel()
+        val dirty = state.tabs.filter { it.dirty && it.isLoaded }
+        val repository = repository
+        state = state.copy(
+            tabs = emptyList(),
+            activeTab = -1,
+            headings = emptyList(),
+            stats = DocStats(0, 0, 0),
+            lines = emptyList(),
+            markdownText = "",
+        )
+        persistTabs()
+        if (repository != null && dirty.isNotEmpty()) {
+            scope.launch {
+                for (tab in dirty) {
+                    runCatching { repository.writeNote(tab.path, tab.text) }
+                }
+            }
+        }
+    }
+
     private fun removeTabState(index: Int): Int {
         if (index !in state.tabs.indices) return state.activeTab
         val tabs = state.tabs.toMutableList().also { it.removeAt(index) }
@@ -709,7 +893,7 @@ class VibecodiumController(context: Context) {
             index == state.activeTab -> index.coerceAtMost(tabs.lastIndex)
             else -> state.activeTab
         }
-        state = state.copy(tabs = tabs, activeTab = active, tabSwitcher = false)
+        state = state.copy(tabs = tabs, activeTab = active)
         return active
     }
 
@@ -814,6 +998,7 @@ class VibecodiumController(context: Context) {
             explorerRenamePath = path,
             explorerRenameValue = path.substringAfterLast('/'),
             explorerRenameFolder = isFolder,
+            openAfterRenamePath = null,
             // The row must be visible for the editor to sit on it.
             fileQuery = "",
         )
@@ -824,6 +1009,7 @@ class VibecodiumController(context: Context) {
             explorerRenamePath = null,
             explorerRenameValue = "",
             explorerRenameFolder = false,
+            openAfterRenamePath = null,
         )
     }
 
@@ -833,6 +1019,7 @@ class VibecodiumController(context: Context) {
             explorerRenamePath = null,
             explorerRenameValue = "",
             explorerRenameFolder = false,
+            openAfterRenamePath = null,
             explorerMenuPath = null,
             movePath = null,
         )
@@ -848,6 +1035,8 @@ class VibecodiumController(context: Context) {
         val oldPath = state.explorerRenamePath ?: return
         val repository = repository ?: return
         val isFolder = state.explorerRenameFolder
+        // Captured before dismissing the editor, which clears it.
+        val openAfter = state.openAfterRenamePath
         val typed = (value ?: state.explorerRenameValue).trim()
         if (typed.isEmpty()) {
             dismissExplorerRename()
@@ -872,11 +1061,27 @@ class VibecodiumController(context: Context) {
         val newPath = if (parent.isEmpty()) fileName else "$parent/$fileName"
         if (newPath == oldPath) {
             dismissExplorerRename()
+            // The default name was accepted as is: go straight to the note.
+            if (openAfter != null) openRenamedNote(openAfter)
+            return
+        }
+        // Check the target against the tree before touching the disk: the
+        // rename would otherwise fail only after the editor is gone, and the
+        // SAF file path has no existence check of its own. Keeping the editor
+        // open lets the user pick another name.
+        if (state.entries.any { it.path == newPath } || newPath in state.folders) {
+            state = state.copy(
+                message = "Already exists: ${newPath.substringAfterLast('/')}",
+            )
             return
         }
         // Close the editor before the IO round trip; otherwise IME "done" and
         // a tap outside could submit the same rename twice.
         dismissExplorerRename()
+        // Paint the new name right away. Waiting for the disk round trip let
+        // the row fall back to its old name for a moment and then re-sort,
+        // which read as the whole tree rebuilding itself.
+        applyExplorerRenameLocally(oldPath, newPath)
         scope.launch {
             try {
                 if (isFolder) {
@@ -885,11 +1090,64 @@ class VibecodiumController(context: Context) {
                     repository.renameNote(oldPath, newPath)
                 }
                 applyPathChange(oldPath, newPath)
+                if (openAfter != null) openRenamedNote(renamePathUnder(openAfter, oldPath, newPath))
             } catch (error: Throwable) {
                 error.rethrowIfCancelled()
-                state = state.copy(message = error.message ?: "Rename failed")
+                // Roll the optimistic rows back to what is actually on disk.
+                val restored = runCatching { loadFileLists(repository, refresh = true) }.getOrNull()
+                state = state.copy(
+                    message = error.message ?: "Rename failed",
+                    entries = restored?.entries ?: state.entries,
+                    folders = restored?.folders ?: state.folders,
+                    explorerTree = restored?.tree ?: state.explorerTree,
+                    collapsedFolders = restored?.let { live ->
+                        state.collapsedFolders.filterTo(mutableSetOf()) { it in live.folders }
+                    } ?: state.collapsedFolders,
+                )
             }
         }
+    }
+
+    /**
+     * Rewrites the explorer rows before the rename reaches the disk. The tree
+     * built here matches the one [applyPathChange] loads afterwards, so the
+     * native list is repainted once instead of twice.
+     */
+    private fun applyExplorerRenameLocally(oldPath: String, newPath: String) {
+        val entries = state.entries.map { entry ->
+            val path = renamePathUnder(entry.path, oldPath, newPath)
+            if (path == entry.path) {
+                entry
+            } else {
+                entry.copy(
+                    path = path,
+                    name = path.substringAfterLast('/'),
+                    isNote = isMarkdownName(path),
+                    extension = path.substringAfterLast('.', "").lowercase(),
+                    isCode = codeLanguageFor(path) != null,
+                )
+            }
+        }
+        val folders = state.folders.map { renamePathUnder(it, oldPath, newPath) }
+        // Collapsed rows must follow the rename too, or a renamed folder
+        // flashes open until the disk reload arrives.
+        val collapsed = state.collapsedFolders.mapTo(mutableSetOf()) {
+            renamePathUnder(it, oldPath, newPath)
+        }
+        state = state.copy(
+            entries = entries,
+            folders = folders,
+            explorerTree = buildExplorerTree(entries, folders),
+            collapsedFolders = collapsed,
+        )
+    }
+
+    /**
+     * Opens a note that was created from the explorer row menu once its inline
+     * rename is done, so naming it is the last step before writing.
+     */
+    private fun openRenamedNote(path: String) {
+        openNote(path, modeOverride = EditorMode.Source, focusEditor = true)
     }
 
     /** Rewrites every path-bearing piece of UI state after a rename or move. */
@@ -951,9 +1209,19 @@ class VibecodiumController(context: Context) {
         state = state.copy(explorerMenuPath = null)
     }
 
-    fun menuNewNote(path: String) = createNoteUnder(parentFolderOf(path), open = true)
+    fun menuNewNote(path: String) {
+        // The sheet must go first: creating a note or a folder is async, and
+        // the folder flow then opens the inline rename editor underneath it.
+        state = state.copy(explorerMenuPath = null)
+        // Rename before editing: the note stays closed until the user has
+        // named it in the tree.
+        createNoteUnder(parentFolderOf(path), open = false, renameInline = true)
+    }
 
-    fun menuNewFolder(path: String) = createFolderUnder(parentFolderOf(path))
+    fun menuNewFolder(path: String) {
+        state = state.copy(explorerMenuPath = null)
+        createFolderUnder(parentFolderOf(path))
+    }
 
     fun menuRename(path: String) {
         state = state.copy(explorerMenuPath = null)
@@ -1085,8 +1353,16 @@ class VibecodiumController(context: Context) {
         persistCollapsedFolders(collapsed)
     }
 
-    /** Creates "Untitled.md" inside [parent] and opens it. */
-    private fun createNoteUnder(parent: String, open: Boolean) {
+    /**
+     * Creates "Untitled.md" inside [parent]. With [renameInline] the note is
+     * not opened: the tree lands on its new row and starts the same inline
+     * rename the new-folder flow uses, so the user can name it first.
+     */
+    private fun createNoteUnder(
+        parent: String,
+        open: Boolean,
+        renameInline: Boolean = false,
+    ) {
         val repository = repository ?: return
         scope.launch {
             try {
@@ -1094,15 +1370,35 @@ class VibecodiumController(context: Context) {
                 val path = if (parent.isEmpty()) name else "$parent/$name"
                 repository.createNote(path, "")
                 val lists = loadFileLists(repository)
-                state = state.copy(
-                    notes = lists.notes,
-                    entries = lists.entries,
-                    folders = lists.folders,
-                    explorerTree = lists.tree,
-                )
-                if (open) {
-                    openNote(path, modeOverride = EditorMode.Source, focusEditor = true)
-                    closeOverlays()
+                if (renameInline) {
+                    val collapsed = expandedForNewEntry(parent)
+                    state = state.copy(
+                        notes = lists.notes,
+                        entries = lists.entries,
+                        folders = lists.folders,
+                        explorerTree = lists.tree,
+                        collapsedFolders = collapsed,
+                        drawer = Drawer.Left,
+                        drawerMode = DrawerMode.Files,
+                        fileQuery = "",
+                        explorerRenamePath = path,
+                        explorerRenameValue = name,
+                        explorerRenameFolder = false,
+                        // Open it as soon as the name is confirmed.
+                        openAfterRenamePath = path,
+                    )
+                    persistCollapsedFolders(collapsed)
+                } else {
+                    state = state.copy(
+                        notes = lists.notes,
+                        entries = lists.entries,
+                        folders = lists.folders,
+                        explorerTree = lists.tree,
+                    )
+                    if (open) {
+                        // The drawer closes from openNote() once the note is loaded.
+                        openNote(path, modeOverride = EditorMode.Source, focusEditor = true)
+                    }
                 }
             } catch (error: Throwable) {
                 error.rethrowIfCancelled()
@@ -1110,6 +1406,16 @@ class VibecodiumController(context: Context) {
             }
         }
     }
+
+    /** Collapsed set with [parent] and its ancestors opened for a new row. */
+    private fun expandedForNewEntry(parent: String): MutableSet<String> =
+        state.collapsedFolders.toMutableSet().also { set ->
+            var current = parent
+            while (current.isNotEmpty()) {
+                set.remove(current)
+                current = current.substringBeforeLast('/', "")
+            }
+        }
 
     // ------------------------------------------------------------- new folder
 
@@ -1128,13 +1434,7 @@ class VibecodiumController(context: Context) {
                 val path = if (parent.isEmpty()) name else "$parent/$name"
                 repository.createFolder(path)
                 val lists = loadFileLists(repository)
-                val collapsed = state.collapsedFolders.toMutableSet().also { set ->
-                    var current = parent
-                    while (current.isNotEmpty()) {
-                        set.remove(current)
-                        current = current.substringBeforeLast('/', "")
-                    }
-                }
+                val collapsed = expandedForNewEntry(parent)
                 state = state.copy(
                     notes = lists.notes,
                     entries = lists.entries,
@@ -1147,6 +1447,7 @@ class VibecodiumController(context: Context) {
                     explorerRenamePath = path,
                     explorerRenameValue = name,
                     explorerRenameFolder = true,
+                    openAfterRenamePath = null,
                 )
                 persistCollapsedFolders(collapsed)
             } catch (error: Throwable) {
@@ -1241,21 +1542,248 @@ class VibecodiumController(context: Context) {
         searchJob?.cancel()
         val repository = repository
         if (query.isBlank() || repository == null) {
-            state = state.copy(searchHits = emptyList())
+            state = state.copy(searchResults = emptyList())
             return
         }
         searchJob = scope.launch {
             delay(200)
             try {
-                val hits = repository.search(query, 50)
+                val results = repository.search(query, SEARCH_FILE_LIMIT)
                 if (state.searchQuery == query) {
-                    state = state.copy(searchHits = hits)
+                    state = state.copy(searchResults = results)
                 }
             } catch (error: Throwable) {
                 error.rethrowIfCancelled()
                 state = state.copy(message = error.message ?: "Search failed")
             }
         }
+    }
+
+    fun toggleSearchCollapsed(path: String) {
+        val collapsed = state.searchCollapsedPaths
+        state = state.copy(
+            searchCollapsedPaths = if (path in collapsed) collapsed - path else collapsed + path,
+        )
+    }
+
+    fun setAllSearchCollapsed(collapsed: Boolean) {
+        state = state.copy(
+            searchCollapsedPaths = if (collapsed) {
+                state.searchResults.mapTo(HashSet()) { it.path }
+            } else {
+                emptySet()
+            },
+        )
+    }
+
+    /** Opens a search result and reveals its first match when it has one. */
+    fun openSearchResult(result: SearchFileResult, match: SearchMatch?) {
+        openNote(
+            path = result.path,
+            modeOverride = EditorMode.Source,
+            revealOffset = match?.offset,
+            revealLength = match?.length ?: 0,
+        )
+    }
+
+    // ------------------------------------------------------------- in-page find
+
+    fun openFindBar(replace: Boolean = false) {
+        val source = state.editorMode == EditorMode.Source
+        state = state.copy(
+            find = state.find.copy(
+                open = true,
+                replaceOpen = replace && source,
+            ),
+        )
+        scanFind()
+    }
+
+    fun closeFindBar() {
+        findJob?.cancel()
+        findJob = null
+        activeEditorView?.clearFindHighlights()
+        state = state.copy(find = FindUiState())
+        activeEditorView?.focusEditor()
+    }
+
+    fun updateFindQuery(value: String) {
+        state = state.copy(find = state.find.copy(query = value))
+        scanFind()
+    }
+
+    fun updateFindReplace(value: String) {
+        state = state.copy(find = state.find.copy(replace = value))
+    }
+
+    fun toggleFindCase() {
+        state = state.copy(find = state.find.copy(caseSensitive = !state.find.caseSensitive))
+        scanFind()
+    }
+
+    fun toggleFindWholeWord() {
+        state = state.copy(find = state.find.copy(wholeWord = !state.find.wholeWord))
+        scanFind()
+    }
+
+    fun findNext() = stepFind(1)
+
+    fun findPrevious() = stepFind(-1)
+
+    fun toggleFindReplace() {
+        if (state.editorMode != EditorMode.Source) return
+        state = state.copy(find = state.find.copy(replaceOpen = !state.find.replaceOpen))
+    }
+
+    private fun stepFind(delta: Int) {
+        val find = state.find
+        if (find.matches.isEmpty()) return
+        val size = find.matches.size
+        val next = Math.floorMod(find.active + delta, size)
+        state = state.copy(find = find.copy(active = next))
+        applyFindActive(reveal = true)
+    }
+
+    private fun scanFind() {
+        findJob?.cancel()
+        val find = state.find
+        if (!find.open) return
+        val tab = state.tabs.getOrNull(state.activeTab) ?: return
+        val path = tab.path
+        val text = tab.text
+        val query = find.query
+        if (query.isEmpty()) {
+            activeEditorView?.clearFindHighlights()
+            state = state.copy(
+                find = find.copy(
+                    matches = emptyList(),
+                    active = -1,
+                    truncated = false,
+                    scanning = false,
+                ),
+            )
+            return
+        }
+        state = state.copy(find = find.copy(scanning = true))
+        findJob = scope.launch {
+            val result = withContext(Dispatchers.Default) {
+                scanFindText(
+                    text = text,
+                    query = query,
+                    caseSensitive = find.caseSensitive,
+                    wholeWord = find.wholeWord,
+                )
+            }
+            val current = state.find
+            val currentTab = state.tabs.getOrNull(state.activeTab)
+            if (currentTab?.path != path || current.query != query ||
+                current.caseSensitive != find.caseSensitive ||
+                current.wholeWord != find.wholeWord
+            ) {
+                return@launch
+            }
+            state = state.copy(
+                find = current.copy(
+                    matches = result.first,
+                    active = if (result.first.isEmpty()) -1 else 0,
+                    truncated = result.second,
+                    scanning = false,
+                ),
+            )
+            applyFindActive(reveal = true)
+        }
+    }
+
+    private fun applyFindActive(reveal: Boolean) {
+        val find = state.find
+        val match = find.matches.getOrNull(find.active)
+        val view = activeEditorView
+        if (match == null) {
+            view?.clearFindHighlights()
+            return
+        }
+        view?.setFindHighlights(find.matches.map { it.start until it.end }, find.active)
+        if (reveal) {
+            view?.revealOffset(match.start, match.end - match.start, focusEditor = false)
+        }
+    }
+
+    fun replaceCurrentFind() {
+        if (state.editorMode != EditorMode.Source || state.find.scanning) return
+        val find = state.find
+        val match = find.matches.getOrNull(find.active) ?: return
+        activeEditorView?.replaceRange(match.start, match.end, find.replace)
+        scanFind()
+    }
+
+    fun replaceAllFind() {
+        if (state.editorMode != EditorMode.Source || state.find.scanning) return
+        val find = state.find
+        val tab = state.tabs.getOrNull(state.activeTab) ?: return
+        if (find.matches.isEmpty()) return
+        val text = tab.text
+        val replacement = find.replace
+        val builder = StringBuilder(text.length)
+        var cursor = 0
+        var replaced = 0
+        for (match in find.matches) {
+            if (match.start < cursor) continue
+            builder.append(text, cursor, match.start)
+            builder.append(replacement)
+            cursor = match.end
+            replaced++
+        }
+        builder.append(text, cursor, text.length)
+        if (replaced == 0) return
+        updateEditor(TextFieldValue(builder.toString(), TextRange(0)))
+        scanFind()
+    }
+
+    private suspend fun scanFindText(
+        text: String,
+        query: String,
+        caseSensitive: Boolean,
+        wholeWord: Boolean,
+    ): Pair<List<FindMatch>, Boolean> {
+        if (query.isEmpty() || text.length < query.length) {
+            return emptyList<FindMatch>() to false
+        }
+        val lineStarts = ArrayList<Int>()
+        lineStarts.add(0)
+        for (index in text.indices) {
+            if (text[index] == '\n') lineStarts.add(index + 1)
+        }
+        fun lineAt(offset: Int): Int {
+            val found = lineStarts.binarySearch(offset)
+            return (if (found >= 0) found else -found - 2).coerceAtLeast(0) + 1
+        }
+        fun wordChar(character: Char): Boolean =
+            character.isLetterOrDigit() || character == '_'
+
+        val matches = ArrayList<FindMatch>()
+        var search = 0
+        var truncated = false
+        while (search <= text.length - query.length) {
+            if (matches.size % 256 == 0) yield()
+            val start = text.indexOf(query, search, ignoreCase = !caseSensitive)
+            if (start < 0) break
+            val end = start + query.length
+            val wholeWordBlocked = wholeWord && (
+                (start > 0 && wordChar(text[start - 1])) ||
+                    (end < text.length && wordChar(text[end]))
+                )
+            if (wholeWordBlocked) {
+                search = start + 1
+                continue
+            }
+            matches.add(FindMatch(start, end, lineAt(start)))
+            if (matches.size >= MAX_FIND_MATCHES) {
+                truncated = true
+                break
+            }
+            search = end
+        }
+        return matches to truncated
     }
 
     // ------------------------------------------------------------------- mode
@@ -1290,11 +1818,11 @@ class VibecodiumController(context: Context) {
 
     fun openSettings(section: String? = null) {
         closeExplorerActions()
+        refreshInstalledThemes()
         state = state.copy(
             settingsOpen = true,
             settingsSection = section,
             drawer = null,
-            tabSwitcher = false,
         )
     }
 
@@ -1316,13 +1844,61 @@ class VibecodiumController(context: Context) {
         )
     }
 
+    fun setEditorFontSize(fontDp: Int) = updateSettings {
+        it.copy(
+            editorFontDp = fontDp.coerceIn(
+                AppSettingsJson.MIN_EDITOR_FONT_DP,
+                AppSettingsJson.MAX_EDITOR_FONT_DP,
+            ),
+        )
+    }
+
     fun setAutoHideChrome(enabled: Boolean) = updateSettings { it.copy(autoHideChrome = enabled) }
+
+    fun setCodeFontSize(fontDp: Int) = updateSettings {
+        it.copy(
+            codeFontDp = fontDp.coerceIn(
+                AppSettingsJson.MIN_CODE_FONT_DP,
+                AppSettingsJson.MAX_CODE_FONT_DP,
+            ),
+        )
+    }
+
+    fun setTextFontFace(face: EditorFontFace) = updateSettings { it.copy(textFontFace = face) }
+
+    fun setCodeFontFace(face: EditorFontFace) = updateSettings { it.copy(codeFontFace = face) }
+
+    fun setHeadingFontSize(level: Int, size: Int) = updateHeading(level) {
+        it.copy(fontSize = size.coerceIn(6, 64))
+    }
+
+    fun setHeadingColor(level: Int, colorName: String) = updateHeading(level) {
+        it.copy(colorName = colorName)
+    }
+
+    fun toggleHeadingBold(level: Int) = updateHeading(level) { it.copy(bold = !it.bold) }
+
+    fun toggleHeadingItalic(level: Int) = updateHeading(level) { it.copy(italic = !it.italic) }
+
+    private inline fun updateHeading(level: Int, transform: (HeadingStyle) -> HeadingStyle) {
+        updateSettings {
+            it.copy(headings = it.headings.with(level, transform(it.headings.style(level))))
+        }
+    }
 
     fun setNavbarEnabled(enabled: Boolean) = updateSettings { it.copy(navbarEnabled = enabled) }
 
     fun setDefaultEditorMode(mode: EditorMode) = updateSettings { it.copy(defaultEditorMode = mode) }
 
     fun setAutoSaveDelay(millis: Int) = updateSettings { it.copy(autoSaveDelayMs = millis) }
+
+    fun setHighlightCurrentLine(enabled: Boolean) = updateSettings {
+        it.copy(highlightCurrentLine = enabled)
+    }
+
+    fun setHighlightWrappedLineInGutter(enabled: Boolean) = updateSettings {
+        it.copy(highlightWrappedLineInGutter = enabled)
+    }
 
     fun setDailyNotesEnabled(enabled: Boolean) = updateSettings {
         it.copy(dailyNotes = it.dailyNotes.copy(enabled = enabled))
@@ -1342,7 +1918,273 @@ class VibecodiumController(context: Context) {
 
     fun resetSettings() {
         updateSettings { AppSettings() }
+        refreshThemeState()
         showMessage("Settings reset")
+    }
+
+    // ------------------------------------------------------------- appearance
+
+    fun setThemeMode(mode: ThemeMode) {
+        updateSettings { it.copy(themeMode = mode) }
+        refreshThemeState()
+    }
+
+    /** Flips between explicit light and dark modes using the two theme slots. */
+    fun toggleThemeMode() {
+        setThemeMode(if (effectiveDark()) ThemeMode.Light else ThemeMode.Dark)
+    }
+
+    fun setThemeName(slot: ThemeSlot, name: String) {
+        val clean = state.installedThemes.firstOrNull { it.name == name }?.name ?: ""
+        updateSettings {
+            when (slot) {
+                ThemeSlot.Light -> it.copy(lightThemeName = clean)
+                ThemeSlot.Dark -> it.copy(darkThemeName = clean)
+            }
+        }
+        refreshThemeState()
+    }
+
+    fun setAccentColor(argb: Int?) {
+        updateSettings { it.copy(accentColor = argb) }
+        refreshThemeState()
+    }
+
+    fun clearThemeError() {
+        if (state.themeError != null) state = state.copy(themeError = null)
+    }
+
+    fun refreshThemeState(loadInstalled: Boolean = false) {
+        val settings = state.settings
+        val configuration = appContext.resources.configuration
+        val tablet = configuration.smallestScreenWidthDp >= 600
+        themeJob?.cancel()
+        themeJob = scope.launch {
+            val lightDeferred = async(Dispatchers.IO) {
+                themeManager.ensureConfig(settings.lightThemeName, dark = false)
+            }
+            val darkDeferred = async(Dispatchers.IO) {
+                themeManager.ensureConfig(settings.darkThemeName, dark = true)
+            }
+            val lightConfig = lightDeferred.await()
+            val darkConfig = darkDeferred.await()
+            val installed = if (loadInstalled) {
+                withContext(Dispatchers.IO) { themeManager.installed() }
+            } else {
+                state.installedThemes
+            }
+            state = state.copy(
+                themeLightPalette = lightConfig
+                    .palette(dark = false, isTablet = tablet)
+                    .withAccent(settings.accentColor),
+                themeDarkPalette = darkConfig
+                    .palette(dark = true, isTablet = tablet)
+                    .withAccent(settings.accentColor),
+                themeWarnings = ThemeManager.collapseWarnings(
+                    lightConfig.warnings + darkConfig.warnings,
+                ),
+                installedThemes = installed,
+            )
+            applyNativePalette()
+        }
+    }
+
+    fun refreshInstalledThemes() {
+        scope.launch {
+            val installed = withContext(Dispatchers.IO) { themeManager.installed() }
+            state = state.copy(installedThemes = installed)
+        }
+    }
+
+    fun loadThemeCatalog(force: Boolean = false) {
+        if (state.themeCatalogLoading) return
+        state = state.copy(themeCatalogLoading = true, themeError = null)
+        scope.launch {
+            try {
+                val entries = themeManager.catalog(force)
+                val installed = withContext(Dispatchers.IO) { themeManager.installed() }
+                val installedByName = installed.associateBy { it.name }
+                val updates = state.themeUpdates
+                val merged = entries.map { entry ->
+                    entry.copy(
+                        installedVersion = installedByName[entry.name]?.version,
+                        updateVersion = updates[entry.name],
+                    )
+                }
+                state = state.copy(
+                    themeCatalog = merged,
+                    installedThemes = installed,
+                    themeCatalogLoading = false,
+                )
+            } catch (error: Throwable) {
+                error.rethrowIfCancelled()
+                state = state.copy(
+                    themeCatalogLoading = false,
+                    themeError = error.message ?: "Could not load community themes",
+                )
+            }
+        }
+    }
+
+    fun installTheme(name: String, slot: ThemeSlot) {
+        if (state.themeBusy != null) return
+        state = state.copy(themeError = null)
+        scope.launch {
+            try {
+                val entry = state.themeCatalog.firstOrNull { it.name == name }
+                    ?: themeManager.catalog(false).firstOrNull { it.name == name }
+                    ?: error("Theme “$name” was not found in the catalog")
+                state = state.copy(themeBusy = name, themeError = null)
+                val theme = withContext(Dispatchers.IO) { themeManager.install(entry) }
+                val installed = withContext(Dispatchers.IO) { themeManager.installed() }
+                updateSettings {
+                    when (slot) {
+                        ThemeSlot.Light -> it.copy(lightThemeName = entry.name)
+                        ThemeSlot.Dark -> it.copy(darkThemeName = entry.name)
+                    }
+                }
+                state = state.copy(
+                    installedThemes = installed,
+                    themeBusy = null,
+                    themeUpdates = state.themeUpdates - entry.name,
+                    themeCatalog = state.themeCatalog.map { item ->
+                        if (item.name == entry.name) {
+                            item.copy(installedVersion = theme.version, updateVersion = null)
+                        } else {
+                            item
+                        }
+                    },
+                )
+                refreshThemeState()
+                showMessage("Installed theme “${entry.name}”")
+            } catch (error: Throwable) {
+                error.rethrowIfCancelled()
+                state = state.copy(
+                    themeBusy = null,
+                    themeError = error.message ?: "Could not install the theme",
+                )
+            }
+        }
+    }
+
+    fun uninstallTheme(name: String) {
+        if (state.themeBusy != null) return
+        scope.launch {
+            try {
+                state = state.copy(themeBusy = name, themeError = null)
+                withContext(Dispatchers.IO) { themeManager.remove(name) }
+                val installed = withContext(Dispatchers.IO) { themeManager.installed() }
+                if (state.settings.lightThemeName == name || state.settings.darkThemeName == name) {
+                    updateSettings {
+                        it.copy(
+                            lightThemeName = if (it.lightThemeName == name) "" else it.lightThemeName,
+                            darkThemeName = if (it.darkThemeName == name) "" else it.darkThemeName,
+                        )
+                    }
+                }
+                state = state.copy(
+                    installedThemes = installed,
+                    themeBusy = null,
+                    themeUpdates = state.themeUpdates - name,
+                    themeCatalog = state.themeCatalog.map { item ->
+                        if (item.name == name) item.copy(installedVersion = null, updateVersion = null) else item
+                    },
+                )
+                refreshThemeState()
+                showMessage("Removed theme “$name”")
+            } catch (error: Throwable) {
+                error.rethrowIfCancelled()
+                state = state.copy(
+                    themeBusy = null,
+                    themeError = error.message ?: "Could not remove the theme",
+                )
+            }
+        }
+    }
+
+    fun checkThemeUpdates() {
+        if (state.themeCheckingUpdates || state.installedThemes.isEmpty()) return
+        state = state.copy(themeCheckingUpdates = true, themeError = null)
+        scope.launch {
+            try {
+                val entries = state.themeCatalog.ifEmpty { themeManager.catalog(false) }
+                val installed = withContext(Dispatchers.IO) { themeManager.installed() }
+                val updates = themeManager.updates(installed, entries)
+                state = state.copy(
+                    installedThemes = installed,
+                    themeCatalog = entries.map { entry ->
+                        entry.copy(
+                            installedVersion = installed.firstOrNull { it.name == entry.name }?.version,
+                            updateVersion = updates[entry.name],
+                        )
+                    },
+                    themeUpdates = updates,
+                    themeCheckingUpdates = false,
+                )
+                showMessage(
+                    if (updates.isEmpty()) "No theme updates found"
+                    else "Found ${updates.size} theme update${if (updates.size == 1) "" else "s"}",
+                )
+            } catch (error: Throwable) {
+                error.rethrowIfCancelled()
+                state = state.copy(
+                    themeCheckingUpdates = false,
+                    themeError = error.message ?: "Could not check for theme updates",
+                )
+            }
+        }
+    }
+
+    fun updateTheme(name: String) {
+        if (state.themeBusy != null) return
+        val entry = state.themeCatalog.firstOrNull { it.name == name } ?: return
+        state = state.copy(themeBusy = name, themeError = null)
+        scope.launch {
+            try {
+                val theme = withContext(Dispatchers.IO) { themeManager.install(entry) }
+                val installed = withContext(Dispatchers.IO) { themeManager.installed() }
+                state = state.copy(
+                    installedThemes = installed,
+                    themeBusy = null,
+                    themeUpdates = state.themeUpdates - name,
+                    themeCatalog = state.themeCatalog.map { item ->
+                        if (item.name == name) {
+                            item.copy(installedVersion = theme.version, updateVersion = null)
+                        } else {
+                            item
+                        }
+                    },
+                )
+                if (state.settings.lightThemeName == name || state.settings.darkThemeName == name) {
+                    refreshThemeState()
+                }
+                showMessage("Updated theme “$name”")
+            } catch (error: Throwable) {
+                error.rethrowIfCancelled()
+                state = state.copy(
+                    themeBusy = null,
+                    themeError = error.message ?: "Could not update the theme",
+                )
+            }
+        }
+    }
+
+    fun applyNativePalette(dark: Boolean = effectiveDark()) {
+        val palette = if (dark) state.themeDarkPalette else state.themeLightPalette
+        val previous = nativePaletteKey
+        if (previous != null && previous.first == dark && previous.second === palette) return
+        nativePaletteKey = dark to palette
+        runCatching { CoreBridge.nativeThemeSetPalette(palette.toNativeJson()) }
+        NativeSurfaceView.refreshTheme()
+    }
+
+    private fun effectiveDark(): Boolean = when (state.settings.themeMode) {
+        ThemeMode.Dark -> true
+        ThemeMode.Light -> false
+        ThemeMode.System -> {
+            val mode = appContext.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+            mode == Configuration.UI_MODE_NIGHT_YES
+        }
     }
 
     fun resetCollapsedFolders() {
@@ -1453,7 +2295,6 @@ class VibecodiumController(context: Context) {
             state = state.copy(
                 viewerPath = path,
                 drawer = null,
-                tabSwitcher = false,
             )
         } else {
             state = state.copy(
@@ -1816,23 +2657,35 @@ class VibecodiumController(context: Context) {
         if (state.drawer != null) closeExplorerActions()
         state = state.copy(
             drawer = if (state.drawer == drawer) null else drawer,
-            tabSwitcher = false,
         )
     }
 
     fun setDrawerMode(mode: DrawerMode) {
         closeExplorerActions()
-        state = state.copy(drawer = Drawer.Left, drawerMode = mode, tabSwitcher = false)
+        state = state.copy(drawer = Drawer.Left, drawerMode = mode)
     }
 
-    fun toggleTabSwitcher() {
-        closeExplorerActions()
-        state = state.copy(tabSwitcher = !state.tabSwitcher, drawer = null)
+    /** Closes the outline and centers the active editor on a heading line. */
+    fun revealHeading(heading: Heading) {
+        val tab = state.tabs.getOrNull(state.activeTab) ?: return
+        var offset = 0
+        var line = 0
+        val targetLine = (heading.line - 1).coerceAtLeast(0)
+        while (line < targetLine) {
+            val newline = tab.text.indexOf('\n', offset)
+            if (newline < 0) break
+            offset = newline + 1
+            line++
+        }
+        closeOverlays()
+        activeEditorView?.revealOffset(offset, 0, focusEditor = false)
     }
 
     fun closeOverlays() {
         closeExplorerActions()
-        state = state.copy(drawer = null, tabSwitcher = false)
+        pendingFramePath = null
+        pendingFrameReady = null
+        state = state.copy(drawer = null)
     }
 
     fun back() {
@@ -1846,10 +2699,6 @@ class VibecodiumController(context: Context) {
         }
         if (state.viewerPath != null) {
             state = state.copy(viewerPath = null)
-            return
-        }
-        if (state.tabSwitcher) {
-            state = state.copy(tabSwitcher = false)
             return
         }
         if (state.explorerMenuPath != null) {
